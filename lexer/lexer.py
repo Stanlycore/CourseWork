@@ -6,6 +6,7 @@
 
 from typing import List, Optional
 from .tokens import Token, TokenType, KEYWORD_MAP, PYTHON2_KEYWORDS
+from identifier_table import IdentifierTable
 
 
 class Lexer:
@@ -18,6 +19,9 @@ class Lexer:
         self.column = 1
         self.tokens: List[Token] = []
         self.errors: List[str] = []
+        
+        # Таблица идентификаторов
+        self.identifier_table = IdentifierTable()
         
         # Стек отступов для INDENT/DEDENT
         self.indent_stack = [0]
@@ -90,10 +94,14 @@ class Lexer:
         if indent_level > current_indent:
             self.indent_stack.append(indent_level)
             self.tokens.append(Token(TokenType.INDENT, indent_level, start_line, start_col))
+            # Входим в новую область видимости
+            self.identifier_table.enter_scope()
         elif indent_level < current_indent:
             while len(self.indent_stack) > 1 and self.indent_stack[-1] > indent_level:
                 self.indent_stack.pop()
                 self.tokens.append(Token(TokenType.DEDENT, indent_level, start_line, start_col))
+                # Выходим из области видимости
+                self.identifier_table.exit_scope()
             
             if self.indent_stack[-1] != indent_level:
                 self.errors.append(
@@ -118,6 +126,11 @@ class Lexer:
         if value in KEYWORD_MAP:
             return Token(KEYWORD_MAP[value], value, start_line, start_column)
         
+        # Добавляем идентификатор в таблицу
+        success, error = self.identifier_table.insert(value, kind="var", type_="auto")
+        if not success:
+            self.errors.append(f"Строка {start_line}:{start_column}: {error}")
+        
         return Token(TokenType.IDENTIFIER, value, start_line, start_column)
     
     def read_number(self) -> Token:
@@ -132,7 +145,11 @@ class Lexer:
             value += self.advance()  # x
             while self.current_char() and self.current_char() in '0123456789abcdefABCDEF':
                 value += self.advance()
-            return Token(TokenType.NUMBER, int(value, 16), start_line, start_column)
+            try:
+                return Token(TokenType.NUMBER, int(value, 16), start_line, start_column)
+            except ValueError:
+                self.errors.append(f"Строка {start_line}:{start_column}: Некорректное hex число '{value}'")
+                return Token(TokenType.UNKNOWN, value, start_line, start_column)
         
         # Binary: 0b...
         if self.current_char() == '0' and self.peek_char() in ('b', 'B'):
@@ -140,7 +157,11 @@ class Lexer:
             value += self.advance()  # b
             while self.current_char() and self.current_char() in '01':
                 value += self.advance()
-            return Token(TokenType.NUMBER, int(value, 2), start_line, start_column)
+            try:
+                return Token(TokenType.NUMBER, int(value, 2), start_line, start_column)
+            except ValueError:
+                self.errors.append(f"Строка {start_line}:{start_column}: Некорректное binary число '{value}'")
+                return Token(TokenType.UNKNOWN, value, start_line, start_column)
         
         # Octal: 0o... (Python3) или 0... (Python2)
         if self.current_char() == '0' and self.peek_char() in ('o', 'O'):
@@ -148,7 +169,11 @@ class Lexer:
             value += self.advance()  # o
             while self.current_char() and self.current_char() in '01234567':
                 value += self.advance()
-            return Token(TokenType.NUMBER, int(value, 8), start_line, start_column)
+            try:
+                return Token(TokenType.NUMBER, int(value, 8), start_line, start_column)
+            except ValueError:
+                self.errors.append(f"Строка {start_line}:{start_column}: Некорректное octal число '{value}'")
+                return Token(TokenType.UNKNOWN, value, start_line, start_column)
         
         # Обычное число
         is_float = False
@@ -171,8 +196,12 @@ class Lexer:
             while self.current_char() and self.current_char().isdigit():
                 value += self.advance()
         
-        num_value = float(value) if is_float else int(value)
-        return Token(TokenType.NUMBER, num_value, start_line, start_column)
+        try:
+            num_value = float(value) if is_float else int(value)
+            return Token(TokenType.NUMBER, num_value, start_line, start_column)
+        except ValueError:
+            self.errors.append(f"Строка {start_line}:{start_column}: Некорректное число '{value}'")
+            return Token(TokenType.UNKNOWN, value, start_line, start_column)
     
     def read_string(self, quote: str) -> Token:
         """Чтение строки (одинарные или двойные кавычки, тройные)"""
@@ -207,9 +236,10 @@ class Lexer:
                 if self.current_char() == '\\':
                     self.advance()
                     escape_char = self.advance()
-                    # Обработка escape-последовательностей
-                    escape_map = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', quote: quote}
-                    value += escape_map.get(escape_char, escape_char)
+                    if escape_char:
+                        # Обработка escape-последовательностей
+                        escape_map = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', quote: quote}
+                        value += escape_map.get(escape_char, escape_char)
                 else:
                     value += self.advance()
             
@@ -354,6 +384,7 @@ class Lexer:
         while len(self.indent_stack) > 1:
             self.indent_stack.pop()
             self.tokens.append(Token(TokenType.DEDENT, 0, self.line, self.column))
+            self.identifier_table.exit_scope()
         
         # Финальный EOF
         self.tokens.append(Token(TokenType.EOF, '', self.line, self.column))
