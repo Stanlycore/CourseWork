@@ -64,9 +64,21 @@ class Parser:
             if self.current_token().type == TokenType.EOF:
                 break
             
+            # Сохраняем позицию для защиты от зацикливания
+            old_pos = self.pos
+            
             stmt = self.parse_statement()
             if stmt:
                 program.body.append(stmt)
+            
+            # КРИТИЧЕСКИ ВАЖНО: если позиция не изменилась, принудительно продвигаемся
+            if self.pos == old_pos:
+                token = self.current_token()
+                self.errors.append(
+                    f"Строка {token.line}:{token.column}: "
+                    f"Не удалось разобрать инструкцию. Пропуск токена {token.type.name}."
+                )
+                self.advance()
         
         return program
     
@@ -274,7 +286,15 @@ class Parser:
         # Аргументы
         if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
             while True:
-                print_node.args.append(self.parse_expression())
+                old_pos = self.pos
+                arg = self.parse_expression()
+                
+                if arg:
+                    print_node.args.append(arg)
+                
+                # Защита от зацикливания
+                if self.pos == old_pos:
+                    break
                 
                 if self.current_token().type == TokenType.COMMA:
                     self.advance()
@@ -345,13 +365,17 @@ class Parser:
         """Разбор выражения или присваивания"""
         expr = self.parse_expression()
         
+        if not expr:
+            return None
+        
         # Проверка на присваивание
         if self.current_token().type == TokenType.ASSIGN:
             self.advance()
             value = self.parse_expression()
-            return Assign(target=expr, value=value, 
-                         line=self.current_token().line, 
-                         column=self.current_token().column)
+            if value:
+                return Assign(target=expr, value=value, 
+                             line=self.current_token().line, 
+                             column=self.current_token().column)
         
         return expr
     
@@ -363,11 +387,15 @@ class Parser:
         """Логическое OR"""
         left = self.parse_and_expr()
         
+        if not left:
+            return None
+        
         while self.current_token().type == TokenType.OR:
             op_token = self.advance()
             right = self.parse_and_expr()
-            left = BinOp(left=left, op='or', right=right, 
-                        line=op_token.line, column=op_token.column)
+            if right:
+                left = BinOp(left=left, op='or', right=right, 
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -375,11 +403,15 @@ class Parser:
         """Логическое AND"""
         left = self.parse_not_expr()
         
+        if not left:
+            return None
+        
         while self.current_token().type == TokenType.AND:
             op_token = self.advance()
             right = self.parse_not_expr()
-            left = BinOp(left=left, op='and', right=right,
-                        line=op_token.line, column=op_token.column)
+            if right:
+                left = BinOp(left=left, op='and', right=right,
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -388,14 +420,18 @@ class Parser:
         if self.current_token().type == TokenType.NOT:
             op_token = self.advance()
             operand = self.parse_not_expr()
-            return UnaryOp(op='not', operand=operand,
-                          line=op_token.line, column=op_token.column)
+            if operand:
+                return UnaryOp(op='not', operand=operand,
+                              line=op_token.line, column=op_token.column)
         
         return self.parse_comparison()
     
     def parse_comparison(self) -> Optional[ASTNode]:
         """Сравнения"""
         left = self.parse_add_expr()
+        
+        if not left:
+            return None
         
         comp_ops = {TokenType.EQ, TokenType.NE, TokenType.LT, 
                    TokenType.LE, TokenType.GT, TokenType.GE, 
@@ -404,8 +440,9 @@ class Parser:
         while self.current_token().type in comp_ops:
             op_token = self.advance()
             right = self.parse_add_expr()
-            left = BinOp(left=left, op=op_token.value, right=right,
-                        line=op_token.line, column=op_token.column)
+            if right:
+                left = BinOp(left=left, op=op_token.value, right=right,
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -413,11 +450,15 @@ class Parser:
         """Сложение и вычитание"""
         left = self.parse_mult_expr()
         
+        if not left:
+            return None
+        
         while self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
             right = self.parse_mult_expr()
-            left = BinOp(left=left, op=op_token.value, right=right,
-                        line=op_token.line, column=op_token.column)
+            if right:
+                left = BinOp(left=left, op=op_token.value, right=right,
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -425,14 +466,18 @@ class Parser:
         """Умножение, деление, остаток"""
         left = self.parse_power_expr()
         
+        if not left:
+            return None
+        
         ops = {TokenType.MULTIPLY, TokenType.DIVIDE, 
                TokenType.FLOOR_DIVIDE, TokenType.MODULO}
         
         while self.current_token().type in ops:
             op_token = self.advance()
             right = self.parse_power_expr()
-            left = BinOp(left=left, op=op_token.value, right=right,
-                        line=op_token.line, column=op_token.column)
+            if right:
+                left = BinOp(left=left, op=op_token.value, right=right,
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -440,11 +485,15 @@ class Parser:
         """Возведение в степень"""
         left = self.parse_unary_expr()
         
+        if not left:
+            return None
+        
         if self.current_token().type == TokenType.POWER:
             op_token = self.advance()
             right = self.parse_power_expr()  # Правоассоциативно
-            return BinOp(left=left, op='**', right=right,
-                        line=op_token.line, column=op_token.column)
+            if right:
+                return BinOp(left=left, op='**', right=right,
+                            line=op_token.line, column=op_token.column)
         
         return left
     
@@ -453,8 +502,9 @@ class Parser:
         if self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
             operand = self.parse_unary_expr()
-            return UnaryOp(op=op_token.value, operand=operand,
-                          line=op_token.line, column=op_token.column)
+            if operand:
+                return UnaryOp(op=op_token.value, operand=operand,
+                              line=op_token.line, column=op_token.column)
         
         return self.parse_primary()
     
@@ -474,7 +524,15 @@ class Parser:
                 
                 if self.current_token().type != TokenType.RPAREN:
                     while True:
-                        call.args.append(self.parse_expression())
+                        old_pos = self.pos
+                        arg = self.parse_expression()
+                        
+                        if arg:
+                            call.args.append(arg)
+                        
+                        # Защита от зацикливания
+                        if self.pos == old_pos:
+                            break
                         
                         if self.current_token().type == TokenType.COMMA:
                             self.advance()
@@ -512,6 +570,8 @@ class Parser:
             f"Строка {token.line}:{token.column}: "
             f"Неожиданный токен {token.type.name}"
         )
+        # Принудительное продвижение для предотвращения зацикливания
+        self.advance()
         return None
     
     def parse_block(self) -> List[ASTNode]:
@@ -524,8 +584,21 @@ class Parser:
             if self.current_token().type in (TokenType.DEDENT, TokenType.EOF):
                 break
             
+            # Сохраняем позицию для защиты от зацикливания
+            old_pos = self.pos
+            
             stmt = self.parse_statement()
             if stmt:
                 statements.append(stmt)
+            
+            # КРИТИЧЕСКИ ВАЖНО: если позиция не изменилась, принудительно продвигаемся
+            if self.pos == old_pos:
+                token = self.current_token()
+                self.errors.append(
+                    f"Строка {token.line}:{token.column}: "
+                    f"Не удалось разобрать токен {token.type.name} (value={token.value}). "
+                    f"Пропускаем для предотвращения зацикливания."
+                )
+                self.advance()
         
         return statements
