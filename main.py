@@ -8,6 +8,8 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 from typing import Optional, List, Tuple
+import traceback
+import sys
 
 from lexer import Lexer, Token, TokenType
 from parser import Parser
@@ -16,6 +18,7 @@ from identifier_table import IdentifierTable
 from optimizer import Optimizer
 from code_generator import CodeGenerator
 from examples.examples import EXAMPLES
+from logger import TranslatorLogger
 
 
 class ASTVisualizer:
@@ -252,6 +255,9 @@ class TranslatorGUI:
         self.ast: Optional[ASTNode] = None
         self.ast_visualizer: Optional[ASTVisualizer] = None
         
+        # Логгер
+        self.logger = TranslatorLogger()
+        
         # Цвета для scope
         self.scope_colors = [
             '#E8F5E9', '#FFF9C4', '#FFE0B2', '#FFCCBC', '#FFAB91',
@@ -317,7 +323,7 @@ class TranslatorGUI:
         # Кнопка анализа
         self.analyze_btn = ttk.Button(
             left_frame, text="▶ Анализировать и перевести",
-            command=self._analyze, style='Accent.TButton'
+            command=self._analyze_safe, style='Accent.TButton'
         )
         self.analyze_btn.pack(fill=tk.X, pady=5)
         
@@ -520,69 +526,167 @@ class TranslatorGUI:
         self.console_text.see(tk.END)
         self.console_text.configure(state=tk.DISABLED)
     
+    def _analyze_safe(self):
+        """Безопасный вызов анализа с обработкой исключений"""
+        try:
+            # Начинаем новую сессию логирования
+            log_file = self.logger.start_new_session()
+            self.logger.info(f"Python версия: {sys.version}")
+            self.logger.info(f"Tkinter версия: {tk.TkVersion}")
+            
+            # Выполняем анализ
+            self._analyze()
+            
+            # Закрываем лог
+            self.logger.close()
+            
+        except Exception as e:
+            # Логируем критическую ошибку
+            self.logger.critical(f"КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
+            self.logger.exception("Traceback:")
+            self.logger.close()
+            
+            # Показываем пользователю
+            error_msg = f"Произошла критическая ошибка:\n{str(e)}\n\nЛог сохранен в: {self.logger.current_log_file}"
+            self._log(f"\n✘ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", 'error')
+            messagebox.showerror("Ошибка", error_msg)
+    
     def _analyze(self):
         """Главная функция анализа"""
+        self.logger.section("НАЧАЛО АНАЛИЗА")
         self._clear_views()
         
         source = self.input_text.get('1.0', tk.END)
+        self.logger.info(f"Длина исходного кода: {len(source)} символов")
+        self.logger.debug(f"Первые 100 символов: {source[:100]}")
         
         self._log("=" * 60)
         self._log("НАЧАЛО АНАЛИЗА", 'success')
         self._log("=" * 60)
         
         # 1. Лексический анализ
+        self.logger.section("ЭТАП 1: ЛЕКСИЧЕСКИЙ АНАЛИЗ")
         self._log("\n[1/5] Лексический анализ...")
-        self.lexer = Lexer(source)
-        self.id_table = self.lexer.identifier_table
         
-        tokens = self.lexer.scan()
-        
-        if self.lexer.errors:
-            self._log("\n✘ Обнаружены лексические ошибки:", 'error')
-            for error in self.lexer.errors:
-                self._log(f"  • {error}", 'error')
-            return
-        
-        self._log(f"✔ Найдено {len(tokens)} токенов", 'success')
-        
-        # Заполнение таблицы токенов
-        self._fill_tokens_table(tokens)
-        self._fill_identifier_table()
+        try:
+            self.logger.info("Создание лексера...")
+            self.lexer = Lexer(source)
+            self.logger.info("Лексер создан успешно")
+            
+            self.id_table = self.lexer.identifier_table
+            self.logger.info("Таблица идентификаторов получена")
+            
+            self.logger.info("Запуск сканирования...")
+            tokens = self.lexer.scan()
+            self.logger.info(f"Сканирование завершено. Найдено токенов: {len(tokens)}")
+            
+            if self.lexer.errors:
+                self.logger.error(f"Обнаружено лексических ошибок: {len(self.lexer.errors)}")
+                for i, error in enumerate(self.lexer.errors, 1):
+                    self.logger.error(f"  Ошибка {i}: {error}")
+                
+                self._log("\n✘ Обнаружены лексические ошибки:", 'error')
+                for error in self.lexer.errors:
+                    self._log(f"  • {error}", 'error')
+                return
+            
+            self.logger.info("Лексический анализ завершен успешно")
+            self._log(f"✔ Найдено {len(tokens)} токенов", 'success')
+            
+            # Заполнение таблицы токенов
+            self.logger.info("Заполнение таблицы токенов...")
+            self._fill_tokens_table(tokens)
+            self.logger.info("Таблица токенов заполнена")
+            
+            self.logger.info("Заполнение таблицы идентификаторов...")
+            self._fill_identifier_table()
+            self.logger.info("Таблица идентификаторов заполнена")
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при лексическом анализе: {str(e)}")
+            raise
         
         # 2. Синтаксический анализ
+        self.logger.section("ЭТАП 2: СИНТАКСИЧЕСКИЙ АНАЛИЗ")
         self._log("\n[2/5] Синтаксический анализ...")
-        self.parser = Parser(tokens)
-        self.ast = self.parser.parse()
         
-        if self.parser.errors:
-            self._log("\n✘ Обнаружены синтаксические ошибки:", 'error')
-            for error in self.parser.errors:
-                self._log(f"  • {error}", 'error')
-            return
-        
-        self._log("✔ Синтаксическое дерево построено", 'success')
-        
-        # Отображение дерева (текст и графика)
-        self._display_ast_text(self.ast)
-        self._display_ast_graph(self.ast)
+        try:
+            self.logger.info("Создание парсера...")
+            self.parser = Parser(tokens)
+            self.logger.info("Парсер создан успешно")
+            
+            self.logger.info("Запуск парсинга...")
+            self.ast = self.parser.parse()
+            self.logger.info(f"Парсинг завершен. Тип корневого узла: {type(self.ast).__name__}")
+            
+            if self.parser.errors:
+                self.logger.error(f"Обнаружено синтаксических ошибок: {len(self.parser.errors)}")
+                for i, error in enumerate(self.parser.errors, 1):
+                    self.logger.error(f"  Ошибка {i}: {error}")
+                
+                self._log("\n✘ Обнаружены синтаксические ошибки:", 'error')
+                for error in self.parser.errors:
+                    self._log(f"  • {error}", 'error')
+                return
+            
+            self.logger.info("Синтаксический анализ завершен успешно")
+            self._log("✔ Синтаксическое дерево построено", 'success')
+            
+            # Отображение дерева
+            self.logger.info("Отображение текстового дерева...")
+            self._display_ast_text(self.ast)
+            self.logger.info("Текстовое дерево отображено")
+            
+            self.logger.info("Отображение графического дерева...")
+            self._display_ast_graph(self.ast)
+            self.logger.info("Графическое дерево отображено")
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при синтаксическом анализе: {str(e)}")
+            raise
         
         # 3. Оптимизация
+        self.logger.section("ЭТАП 3: ОПТИМИЗАЦИЯ")
         self._log("\n[3/5] Оптимизация...")
-        optimized_ast = self.optimizer.optimize(self.ast)
-        self._log(f"✔ Применено {self.optimizer.optimizations_applied} оптимизаций", 'success')
+        
+        try:
+            self.logger.info("Запуск оптимизатора...")
+            optimized_ast = self.optimizer.optimize(self.ast)
+            self.logger.info(f"Оптимизация завершена. Применено оптимизаций: {self.optimizer.optimizations_applied}")
+            
+            self._log(f"✔ Применено {self.optimizer.optimizations_applied} оптимизаций", 'success')
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при оптимизации: {str(e)}")
+            raise
         
         # 4. Генерация кода
+        self.logger.section("ЭТАП 4: ГЕНЕРАЦИЯ КОДА")
         self._log("\n[4/5] Генерация Python 3 кода...")
-        python3_code = self.generator.generate(optimized_ast)
         
-        # Вывод результата
-        self.output_text.configure(state=tk.NORMAL)
-        self.output_text.insert('1.0', python3_code)
-        self.output_text.configure(state=tk.DISABLED)
-        
-        self._log("✔ Код успешно сгенерирован", 'success')
+        try:
+            self.logger.info("Запуск генератора кода...")
+            python3_code = self.generator.generate(optimized_ast)
+            self.logger.info(f"Генерация завершена. Длина кода: {len(python3_code)} символов")
+            self.logger.debug(f"Первые 100 символов: {python3_code[:100]}")
+            
+            # Вывод результата
+            self.logger.info("Вывод результата в GUI...")
+            self.output_text.configure(state=tk.NORMAL)
+            self.output_text.insert('1.0', python3_code)
+            self.output_text.configure(state=tk.DISABLED)
+            self.logger.info("Результат выведен")
+            
+            self._log("✔ Код успешно сгенерирован", 'success')
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при генерации кода: {str(e)}")
+            raise
         
         # 5. Завершение
+        self.logger.section("ЗАВЕРШЕНИЕ")
+        self.logger.info("Все этапы завершены успешно")
+        
         self._log("\n" + "=" * 60)
         self._log("АНАЛИЗ ЗАВЕРШЕН УСПЕШНО!", 'success')
         self._log("=" * 60)
