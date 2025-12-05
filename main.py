@@ -7,7 +7,7 @@
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from lexer import Lexer, Token, TokenType
 from parser import Parser
@@ -16,6 +16,223 @@ from identifier_table import IdentifierTable
 from optimizer import Optimizer
 from code_generator import CodeGenerator
 from examples.examples import EXAMPLES
+
+
+class ASTVisualizer:
+    """Визуализатор синтаксического дерева на Canvas"""
+    
+    def __init__(self, canvas: tk.Canvas):
+        self.canvas = canvas
+        self.node_width = 120
+        self.node_height = 40
+        self.level_height = 80
+        self.horizontal_spacing = 20
+        self.node_positions = {}  # {node_id: (x, y)}
+        self.next_x = 50  # Следующая X координата
+        
+    def clear(self):
+        """Очистить canvas"""
+        self.canvas.delete('all')
+        self.node_positions = {}
+        self.next_x = 50
+    
+    def draw_tree(self, root: ASTNode):
+        """Нарисовать дерево"""
+        self.clear()
+        if not root:
+            return
+        
+        # Рассчитываем позиции узлов
+        self._calculate_positions(root, 0)
+        
+        # Рисуем соединения
+        self._draw_connections(root)
+        
+        # Рисуем узлы
+        self._draw_nodes(root)
+        
+        # Обновляем регион прокрутки
+        self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+    
+    def _calculate_positions(self, node: ASTNode, level: int) -> Tuple[int, int]:
+        """Рассчитать позиции узлов"""
+        if not node:
+            return (0, 0)
+        
+        node_id = id(node)
+        y = 50 + level * self.level_height
+        
+        # Получаем детей
+        children = self._get_children(node)
+        
+        if not children:
+            # Листовой узел
+            x = self.next_x
+            self.next_x += self.node_width + self.horizontal_spacing
+            self.node_positions[node_id] = (x, y)
+            return (x, y)
+        
+        # Рассчитываем позиции детей
+        child_positions = []
+        for child in children:
+            if child:
+                pos = self._calculate_positions(child, level + 1)
+                child_positions.append(pos)
+        
+        if child_positions:
+            # Позиция родителя - центр между детьми
+            min_x = min(pos[0] for pos in child_positions)
+            max_x = max(pos[0] for pos in child_positions)
+            x = (min_x + max_x) // 2
+        else:
+            x = self.next_x
+            self.next_x += self.node_width + self.horizontal_spacing
+        
+        self.node_positions[node_id] = (x, y)
+        return (x, y)
+    
+    def _get_children(self, node: ASTNode) -> List[ASTNode]:
+        """Получить список дочерних узлов"""
+        children = []
+        
+        if hasattr(node, 'body') and isinstance(node.body, list):
+            children.extend(node.body)
+        
+        if hasattr(node, 'condition') and node.condition:
+            children.append(node.condition)
+        
+        if hasattr(node, 'then_body') and node.then_body:
+            children.extend(node.then_body)
+        
+        if hasattr(node, 'elif_blocks') and node.elif_blocks:
+            for cond, body in node.elif_blocks:
+                if cond:
+                    children.append(cond)
+                children.extend(body)
+        
+        if hasattr(node, 'else_body') and node.else_body:
+            children.extend(node.else_body)
+        
+        if hasattr(node, 'left') and node.left:
+            children.append(node.left)
+        
+        if hasattr(node, 'right') and node.right:
+            children.append(node.right)
+        
+        if hasattr(node, 'operand') and node.operand:
+            children.append(node.operand)
+        
+        if hasattr(node, 'target') and node.target:
+            children.append(node.target)
+        
+        if hasattr(node, 'value') and isinstance(node.value, ASTNode):
+            children.append(node.value)
+        
+        if hasattr(node, 'iter') and isinstance(node.iter, ASTNode):
+            children.append(node.iter)
+        
+        if hasattr(node, 'args') and node.args:
+            for arg in node.args:
+                if isinstance(arg, ASTNode):
+                    children.append(arg)
+        
+        if hasattr(node, 'func') and isinstance(node.func, ASTNode):
+            children.append(node.func)
+        
+        return children
+    
+    def _draw_connections(self, node: ASTNode):
+        """Нарисовать соединения между узлами"""
+        if not node:
+            return
+        
+        node_id = id(node)
+        if node_id not in self.node_positions:
+            return
+        
+        x1, y1 = self.node_positions[node_id]
+        
+        children = self._get_children(node)
+        for child in children:
+            if child:
+                child_id = id(child)
+                if child_id in self.node_positions:
+                    x2, y2 = self.node_positions[child_id]
+                    # Линия от центра родителя к центру ребенка
+                    self.canvas.create_line(
+                        x1 + self.node_width // 2, y1 + self.node_height,
+                        x2 + self.node_width // 2, y2,
+                        fill='#666666', width=2, arrow=tk.LAST
+                    )
+                    self._draw_connections(child)
+    
+    def _draw_nodes(self, node: ASTNode):
+        """Нарисовать узлы"""
+        if not node:
+            return
+        
+        node_id = id(node)
+        if node_id not in self.node_positions:
+            return
+        
+        x, y = self.node_positions[node_id]
+        
+        # Определяем текст и цвет узла
+        node_type = type(node).__name__
+        node_text = node_type
+        node_color = self._get_node_color(node_type)
+        
+        # Добавляем дополнительную информацию
+        if hasattr(node, 'name') and node.name:
+            node_text = f"{node_type}\n{node.name}"
+        elif hasattr(node, 'id') and node.id:
+            node_text = f"{node_type}\n{node.id}"
+        elif hasattr(node, 'value') and node.value is not None and not isinstance(node.value, ASTNode):
+            val_str = str(node.value)[:15]
+            if len(str(node.value)) > 15:
+                val_str += '...'
+            node_text = f"{node_type}\n{val_str}"
+        elif hasattr(node, 'op') and node.op:
+            node_text = f"{node_type}\n{node.op}"
+        
+        # Рисуем прямоугольник
+        rect = self.canvas.create_rectangle(
+            x, y, x + self.node_width, y + self.node_height,
+            fill=node_color, outline='#333333', width=2
+        )
+        
+        # Рисуем текст
+        text = self.canvas.create_text(
+            x + self.node_width // 2, y + self.node_height // 2,
+            text=node_text, font=('Arial', 9, 'bold'),
+            fill='#000000', width=self.node_width - 10
+        )
+        
+        # Рекурсивно рисуем детей
+        children = self._get_children(node)
+        for child in children:
+            if child:
+                self._draw_nodes(child)
+    
+    def _get_node_color(self, node_type: str) -> str:
+        """Получить цвет узла по типу"""
+        color_map = {
+            'Program': '#E1F5FE',
+            'FunctionDef': '#B3E5FC',
+            'ClassDef': '#81D4FA',
+            'If': '#FFE082',
+            'While': '#FFD54F',
+            'For': '#FFCA28',
+            'Assign': '#C5E1A5',
+            'BinOp': '#AED581',
+            'UnaryOp': '#9CCC65',
+            'Call': '#F48FB1',
+            'Print': '#F06292',
+            'Return': '#EC407A',
+            'Name': '#CE93D8',
+            'Literal': '#BA68C8',
+        }
+        return color_map.get(node_type, '#E0E0E0')
 
 
 class TranslatorGUI:
@@ -33,6 +250,7 @@ class TranslatorGUI:
         self.optimizer = Optimizer()
         self.generator = CodeGenerator()
         self.ast: Optional[ASTNode] = None
+        self.ast_visualizer: Optional[ASTVisualizer] = None
         
         # Цвета для scope
         self.scope_colors = [
@@ -133,12 +351,41 @@ class TranslatorGUI:
         analysis_notebook = ttk.Notebook(self.analysis_tab)
         analysis_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Вкладка синтаксического дерева
-        tree_frame = ttk.Frame(analysis_notebook)
-        analysis_notebook.add(tree_frame, text="Синтаксическое дерево")
+        # Вкладка синтаксического дерева (ГРАФИКА)
+        tree_graph_frame = ttk.Frame(analysis_notebook)
+        analysis_notebook.add(tree_graph_frame, text="🌲 Дерево (графика)")
+        
+        # Canvas с прокруткой
+        canvas_frame = ttk.Frame(tree_graph_frame)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Создаем canvas и scrollbars
+        self.tree_canvas = tk.Canvas(
+            canvas_frame, bg='white', width=800, height=600
+        )
+        
+        h_scroll = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL, command=self.tree_canvas.xview)
+        v_scroll = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL, command=self.tree_canvas.yview)
+        
+        self.tree_canvas.configure(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+        
+        # Размещаем элементы
+        self.tree_canvas.grid(row=0, column=0, sticky='nsew')
+        v_scroll.grid(row=0, column=1, sticky='ns')
+        h_scroll.grid(row=1, column=0, sticky='ew')
+        
+        canvas_frame.grid_rowconfigure(0, weight=1)
+        canvas_frame.grid_columnconfigure(0, weight=1)
+        
+        # Создаем визуализатор
+        self.ast_visualizer = ASTVisualizer(self.tree_canvas)
+        
+        # Вкладка синтаксического дерева (ТЕКСТ)
+        tree_text_frame = ttk.Frame(analysis_notebook)
+        analysis_notebook.add(tree_text_frame, text="📄 Дерево (текст)")
         
         self.tree_text = scrolledtext.ScrolledText(
-            tree_frame, wrap=tk.WORD, font=('Courier New', 10)
+            tree_text_frame, wrap=tk.WORD, font=('Courier New', 10)
         )
         self.tree_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -256,8 +503,12 @@ class TranslatorGUI:
         self.output_text.delete('1.0', tk.END)
         self.output_text.configure(state=tk.DISABLED)
         
-        # Очистка дерева
+        # Очистка текстового дерева
         self.tree_text.delete('1.0', tk.END)
+        
+        # Очистка графического дерева
+        if self.ast_visualizer:
+            self.ast_visualizer.clear()
     
     def _log(self, message: str, tag: str = None):
         """Вывести сообщение в консоль"""
@@ -311,8 +562,9 @@ class TranslatorGUI:
         
         self._log("✔ Синтаксическое дерево построено", 'success')
         
-        # Отображение дерева
-        self._display_ast(self.ast)
+        # Отображение дерева (текст и графика)
+        self._display_ast_text(self.ast)
+        self._display_ast_graph(self.ast)
         
         # 3. Оптимизация
         self._log("\n[3/5] Оптимизация...")
@@ -394,7 +646,7 @@ class TranslatorGUI:
         hash_val = sum(ord(c) for c in scope)
         return self.scope_colors[hash_val % len(self.scope_colors)]
     
-    def _display_ast(self, node: ASTNode, level: int = 0):
+    def _display_ast_text(self, node: ASTNode, level: int = 0):
         """Отобразить AST в текстовом виде"""
         indent = "  " * level
         node_type = type(node).__name__
@@ -404,7 +656,7 @@ class TranslatorGUI:
             self.tree_text.insert(tk.END, f"{indent}{node_type}(name='{node.name}')\n")
         elif hasattr(node, 'id') and node.id:
             self.tree_text.insert(tk.END, f"{indent}{node_type}(id='{node.id}')\n")
-        elif hasattr(node, 'value') and node.value is not None:
+        elif hasattr(node, 'value') and node.value is not None and not isinstance(node.value, ASTNode):
             self.tree_text.insert(tk.END, f"{indent}{node_type}(value={repr(node.value)})\n")
         elif hasattr(node, 'op') and node.op:
             self.tree_text.insert(tk.END, f"{indent}{node_type}(op='{node.op}')\n")
@@ -414,38 +666,43 @@ class TranslatorGUI:
         # Рекурсия по дочерним узлам
         if hasattr(node, 'body') and isinstance(node.body, list):
             for child in node.body:
-                self._display_ast(child, level + 1)
+                self._display_ast_text(child, level + 1)
         
         if hasattr(node, 'condition') and node.condition:
-            self._display_ast(node.condition, level + 1)
+            self._display_ast_text(node.condition, level + 1)
         
         if hasattr(node, 'then_body') and node.then_body:
             for child in node.then_body:
-                self._display_ast(child, level + 1)
+                self._display_ast_text(child, level + 1)
         
         if hasattr(node, 'else_body') and node.else_body:
             for child in node.else_body:
-                self._display_ast(child, level + 1)
+                self._display_ast_text(child, level + 1)
         
         if hasattr(node, 'left') and node.left:
-            self._display_ast(node.left, level + 1)
+            self._display_ast_text(node.left, level + 1)
         
         if hasattr(node, 'right') and node.right:
-            self._display_ast(node.right, level + 1)
+            self._display_ast_text(node.right, level + 1)
         
         if hasattr(node, 'operand') and node.operand:
-            self._display_ast(node.operand, level + 1)
+            self._display_ast_text(node.operand, level + 1)
         
         if hasattr(node, 'target') and node.target:
-            self._display_ast(node.target, level + 1)
+            self._display_ast_text(node.target, level + 1)
         
         if hasattr(node, 'value') and isinstance(node.value, ASTNode):
-            self._display_ast(node.value, level + 1)
+            self._display_ast_text(node.value, level + 1)
         
         if hasattr(node, 'args') and node.args:
             for arg in node.args:
                 if isinstance(arg, ASTNode):
-                    self._display_ast(arg, level + 1)
+                    self._display_ast_text(arg, level + 1)
+    
+    def _display_ast_graph(self, ast: ASTNode):
+        """Отобразить AST графически"""
+        if self.ast_visualizer and ast:
+            self.ast_visualizer.draw_tree(ast)
 
 
 def main():
