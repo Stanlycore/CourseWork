@@ -196,6 +196,10 @@ class Lexer:
             while self.current_char() and self.current_char().isdigit():
                 value += self.advance()
         
+        # Python 2: суффикс L для долгих целых (пропускаем его)
+        if self.current_char() in ('L', 'l'):
+            self.advance()  # опускаем L
+        
         try:
             num_value = float(value) if is_float else int(value)
             return Token(TokenType.NUMBER, num_value, start_line, start_column)
@@ -300,13 +304,17 @@ class Lexer:
             # Операторы и разделители
             self.advance()
             
-            # Двухсимвольные операторы
+            # Двухсимвольные операторы (проверяем ДО односимвольных)
             if ch == '=' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.EQ, '==', start_line, start_col))
             elif ch == '!' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.NE, '!=', start_line, start_col))
+            elif ch == '<' and self.current_char() == '>':
+                # Python 2: <> эквивалент !=
+                self.advance()
+                self.tokens.append(Token(TokenType.NE, '<>', start_line, start_col))
             elif ch == '<' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.LE, '<=', start_line, start_col))
