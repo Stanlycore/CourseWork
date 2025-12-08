@@ -481,7 +481,8 @@ class Parser:
         
         while True:
             if self.current_token().type == TokenType.DOT:
-                dot_token = self.advance()
+                dot_token = self.current_token()
+                self.advance()
                 attr_token = self.expect(TokenType.IDENTIFIER)
                 if attr_token:
                     expr = Attribute(value=expr, attr=attr_token.value,
@@ -489,7 +490,8 @@ class Parser:
                 else:
                     break
             elif self.current_token().type == TokenType.LBRACKET:
-                bracket_token = self.advance()
+                bracket_token = self.current_token()
+                self.advance()
                 index = self.parse_expression()
                 self.expect(TokenType.RBRACKET)
                 if index:
@@ -498,7 +500,8 @@ class Parser:
                 else:
                     break
             elif self.current_token().type == TokenType.LPAREN:
-                paren_token = self.advance()
+                paren_token = self.current_token()
+                self.advance()
                 if isinstance(expr, Name):
                     call = Call(func=expr, line=paren_token.line, column=paren_token.column)
                     
@@ -552,27 +555,101 @@ class Parser:
         """Первичные выражения"""
         token = self.current_token()
         
+        # Идентификатор
         if token.type == TokenType.IDENTIFIER:
             self.advance()
             return Name(id=token.value, line=token.line, column=token.column)
         
+        # Число
         if token.type == TokenType.NUMBER:
             self.advance()
             return Literal(value=token.value, line=token.line, column=token.column)
         
+        # Строка
         if token.type == TokenType.STRING:
             self.advance()
             return Literal(value=token.value, line=token.line, column=token.column)
         
+        # Логические значения
         if token.type in (TokenType.TRUE, TokenType.FALSE, TokenType.NONE):
             self.advance()
-            return Literal(value=token.value, line=token.line, column=token.column)
+            if token.type == TokenType.TRUE:
+                return Literal(value=True, line=token.line, column=token.column)
+            elif token.type == TokenType.FALSE:
+                return Literal(value=False, line=token.line, column=token.column)
+            else:  # NONE
+                return Literal(value=None, line=token.line, column=token.column)
         
-        if token.type == TokenType.LPAREN:
+        # Список [1, 2, 3]
+        if token.type == TokenType.LBRACKET:
+            bracket_token = token
             self.advance()
+            elements = []
+            
+            while self.current_token().type != TokenType.RBRACKET:
+                elem = self.parse_expression()
+                if elem:
+                    elements.append(elem)
+                
+                if self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                else:
+                    break
+            
+            self.expect(TokenType.RBRACKET)
+            return Literal(value=('list', elements), line=bracket_token.line, column=bracket_token.column)
+        
+        # Словарь {"a": 1}
+        if token.type == TokenType.LBRACE:
+            brace_token = token
+            self.advance()
+            pairs = []
+            
+            while self.current_token().type != TokenType.RBRACE:
+                key = self.parse_expression()
+                if key:
+                    self.expect(TokenType.COLON)
+                    value = self.parse_expression()
+                    if value:
+                        pairs.append((key, value))
+                
+                if self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                else:
+                    break
+            
+            self.expect(TokenType.RBRACE)
+            return Literal(value=('dict', pairs), line=brace_token.line, column=brace_token.column)
+        
+        # Кортеж (1, 2, 3) или (а) и скобки
+        if token.type == TokenType.LPAREN:
+            paren_token = token
+            self.advance()
+            
+            # Пустые скобки
+            if self.current_token().type == TokenType.RPAREN:
+                self.advance()
+                return Literal(value=('tuple', []), line=paren_token.line, column=paren_token.column)
+            
             expr = self.parse_expression()
-            self.expect(TokenType.RPAREN)
-            return expr
+            
+            # Кортеж со скобками
+            if self.current_token().type == TokenType.COMMA:
+                elements = [expr] if expr else []
+                while self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                    if self.current_token().type == TokenType.RPAREN:
+                        break
+                    elem = self.parse_expression()
+                    if elem:
+                        elements.append(elem)
+                
+                self.expect(TokenType.RPAREN)
+                return Literal(value=('tuple', elements), line=paren_token.line, column=paren_token.column)
+            else:
+                # Простые скобки
+                self.expect(TokenType.RPAREN)
+                return expr
         
         self.errors.append(
             f"Строка {token.line}:{token.column}: "
