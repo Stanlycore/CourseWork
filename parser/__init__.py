@@ -7,4 +7,5 @@ from .ast_visitor import ASTToTreeVisitor, TreeNode
 
 __all__ = ['Parser', 'ASTNode', 'Program', 'FunctionDef', 'ClassDef', 
            'If', 'While', 'For', 'Assign', 'Print', 'Return',
+           'Attribute', 'Subscript', 'Call', 'BinOp', 'UnaryOp', 'Literal', 'Name',
            'ASTToTreeVisitor', 'TreeNode']
