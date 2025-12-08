@@ -3,11 +3,27 @@
 """
 Синтаксический анализатор Python с поддержкой вложенных структур
 Вариант 12: полная поддержка scope, корректная обработка INDENT/DEDENT
+ФАЗА 1 ИСПРАВЛЕНИЯ: null-checking и защита рекурсии
 """
 
 from typing import List, Optional
 from lexer import Token, TokenType
 from .ast_nodes import *
+
+
+class Pass(ASTNode):
+    """Оператор pass"""
+    pass
+
+
+class Break(ASTNode):
+    """Оператор break"""
+    pass
+
+
+class Continue(ASTNode):
+    """Оператор continue"""
+    pass
 
 
 class Parser:
@@ -18,7 +34,7 @@ class Parser:
         self.pos = 0
         self.errors: List[str] = []
         self._recursion_depth = 0
-        self._max_recursion_depth = 1000  # Защита от бесконечной рекурсии
+        self._max_recursion_depth = 100  # Защита от бесконечной рекурсии
     
     def current_token(self) -> Token:
         """Текущий токен"""
@@ -48,7 +64,7 @@ class Parser:
         
         self.errors.append(
             f"Строка {token.line}:{token.column}: "
-            f"Ожидался {token_type.name}, но получен {token.type.name}"
+            f"Ожидался {token_type.name}, но получен {token.type.name} ({token.value})"
         )
         return None
     
@@ -71,7 +87,7 @@ class Parser:
             old_pos = self.pos
             
             stmt = self._parse_statement()
-            if stmt:
+            if stmt is not None:  # Явная проверка на None
                 program.body.append(stmt)
             
             # КРИТИЧЕСКИ ВАЖНО: если позиция не изменилась, принудительно продвигаемся
@@ -88,11 +104,13 @@ class Parser:
     def _parse_statement(self) -> Optional[ASTNode]:
         """Разбор одной инструкции (внутренняя функция с защитой рекурсии)"""
         # Защита от бесконечной рекурсии
-        if self._recursion_depth > self._max_recursion_depth:
+        if self._recursion_depth >= self._max_recursion_depth:
             token = self.current_token()
             self.errors.append(
-                f"Строка {token.line}:{token.column}: Слишком глубокая вложенность"
+                f"Строка {token.line}:{token.column}: Слишком глубокая вложенность (>{self._max_recursion_depth})"
             )
+            # Вернуть None, но не зацикливаться
+            self.advance()
             return None
         
         self._recursion_depth += 1
@@ -106,6 +124,21 @@ class Parser:
     def _parse_statement_impl(self) -> Optional[ASTNode]:
         """Реальная реализация parse_statement"""
         token = self.current_token()
+        
+        # Pass statement
+        if token.type == TokenType.PASS:
+            pass_token = self.advance()
+            return Pass(line=pass_token.line, column=pass_token.column)
+        
+        # Break statement
+        if token.type == TokenType.BREAK:
+            break_token = self.advance()
+            return Break(line=break_token.line, column=break_token.column)
+        
+        # Continue statement
+        if token.type == TokenType.CONTINUE:
+            cont_token = self.advance()
+            return Continue(line=cont_token.line, column=cont_token.column)
         
         # Определение функции
         if token.type == TokenType.DEF:
@@ -244,7 +277,8 @@ class Parser:
             elif_body = self._parse_block()
             self.expect(TokenType.DEDENT)
             
-            if_node.elif_blocks.append((elif_condition, elif_body))
+            if elif_condition is not None:  # Явная проверка на None
+                if_node.elif_blocks.append((elif_condition, elif_body))
         
         # else блок
         if self.current_token().type == TokenType.ELSE:
@@ -310,7 +344,7 @@ class Parser:
                 old_pos = self.pos
                 arg = self._parse_expression()
                 
-                if arg:
+                if arg is not None:  # Явная проверка на None
                     print_node.args.append(arg)
                 
                 # Защита от зацикливания
@@ -386,17 +420,19 @@ class Parser:
         """Разбор выражения или присваивания"""
         expr = self._parse_expression()
         
-        if not expr:
+        if expr is None:  # Явная проверка на None
             return None
         
         # Проверка на присваивание
         if self.current_token().type == TokenType.ASSIGN:
             self.advance()
             value = self._parse_expression()
-            if value:
+            if value is not None:  # Явная проверка на None
                 return Assign(target=expr, value=value, 
                              line=self.current_token().line, 
                              column=self.current_token().column)
+            # Если значение не разобрано, возвращаем выражение
+            return expr
         
         return expr
     
@@ -408,13 +444,13 @@ class Parser:
         """Логическое OR"""
         left = self._parse_and_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         while self.current_token().type == TokenType.OR:
             op_token = self.advance()
             right = self._parse_and_expr()
-            if right:
+            if right is not None:  # Явная проверка на None
                 left = BinOp(left=left, op='or', right=right, 
                             line=op_token.line, column=op_token.column)
         
@@ -424,13 +460,13 @@ class Parser:
         """Логическое AND"""
         left = self._parse_not_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         while self.current_token().type == TokenType.AND:
             op_token = self.advance()
             right = self._parse_not_expr()
-            if right:
+            if right is not None:  # Явная проверка на None
                 left = BinOp(left=left, op='and', right=right,
                             line=op_token.line, column=op_token.column)
         
@@ -441,7 +477,7 @@ class Parser:
         if self.current_token().type == TokenType.NOT:
             op_token = self.advance()
             operand = self._parse_not_expr()
-            if operand:
+            if operand is not None:  # Явная проверка на None
                 return UnaryOp(op='not', operand=operand,
                               line=op_token.line, column=op_token.column)
         
@@ -451,7 +487,7 @@ class Parser:
         """Сравнения"""
         left = self._parse_add_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         comp_ops = {TokenType.EQ, TokenType.NE, TokenType.LT, 
@@ -461,7 +497,7 @@ class Parser:
         while self.current_token().type in comp_ops:
             op_token = self.advance()
             right = self._parse_add_expr()
-            if right:
+            if right is not None:  # Явная проверка на None
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
@@ -471,13 +507,13 @@ class Parser:
         """Сложение и вычитание"""
         left = self._parse_mult_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         while self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
             right = self._parse_mult_expr()
-            if right:
+            if right is not None:  # Явная проверка на None
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
@@ -487,7 +523,7 @@ class Parser:
         """Умножение, деление, остаток"""
         left = self._parse_power_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         ops = {TokenType.MULTIPLY, TokenType.DIVIDE, 
@@ -496,7 +532,7 @@ class Parser:
         while self.current_token().type in ops:
             op_token = self.advance()
             right = self._parse_power_expr()
-            if right:
+            if right is not None:  # Явная проверка на None
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
@@ -506,13 +542,13 @@ class Parser:
         """Возведение в степень"""
         left = self._parse_unary_expr()
         
-        if not left:
+        if left is None:  # Явная проверка на None
             return None
         
         if self.current_token().type == TokenType.POWER:
             op_token = self.advance()
             right = self._parse_power_expr()  # Правоассоциативно
-            if right:
+            if right is not None:  # Явная проверка на None
                 return BinOp(left=left, op='**', right=right,
                             line=op_token.line, column=op_token.column)
         
@@ -523,7 +559,7 @@ class Parser:
         if self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
             operand = self._parse_unary_expr()
-            if operand:
+            if operand is not None:  # Явная проверка на None
                 return UnaryOp(op=op_token.value, operand=operand,
                               line=op_token.line, column=op_token.column)
         
@@ -548,7 +584,7 @@ class Parser:
                         old_pos = self.pos
                         arg = self._parse_expression()
                         
-                        if arg:
+                        if arg is not None:  # Явная проверка на None
                             call.args.append(arg)
                         
                         # Защита от зацикливания
@@ -578,7 +614,14 @@ class Parser:
         # Логические константы
         if token.type in (TokenType.TRUE, TokenType.FALSE, TokenType.NONE):
             self.advance()
-            return Literal(value=token.value, line=token.line, column=token.column)
+            # Преобразуем значение
+            if token.type == TokenType.TRUE:
+                value = True
+            elif token.type == TokenType.FALSE:
+                value = False
+            else:  # NONE
+                value = None
+            return Literal(value=value, line=token.line, column=token.column)
         
         # Скобки
         if token.type == TokenType.LPAREN:
@@ -589,7 +632,7 @@ class Parser:
         
         self.errors.append(
             f"Строка {token.line}:{token.column}: "
-            f"Неожиданный токен {token.type.name}"
+            f"Неожиданный токен {token.type.name} (value={repr(token.value)})"
         )
         # Принудительное продвижение для предотвращения зацикливания
         self.advance()
@@ -609,7 +652,7 @@ class Parser:
             old_pos = self.pos
             
             stmt = self._parse_statement()
-            if stmt:
+            if stmt is not None:  # Явная проверка на None
                 statements.append(stmt)
             
             # КРИТИЧЕСКИ ВАЖНО: если позиция не изменилась, принудительно продвигаемся
@@ -617,7 +660,7 @@ class Parser:
                 token = self.current_token()
                 self.errors.append(
                     f"Строка {token.line}:{token.column}: "
-                    f"Не удалось разобрать токен {token.type.name} (value={token.value}). "
+                    f"Не удалось разобрать токен {token.type.name} (value={repr(token.value)}). "
                     f"Пропускаем для предотвращения зацикливания."
                 )
                 self.advance()
