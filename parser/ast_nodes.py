@@ -99,6 +99,20 @@ class Call(ASTNode):
 
 
 @dataclass
+class Attribute(ASTNode):
+    """Акцесс к атрибуту: obj.attr"""
+    value: Optional[ASTNode] = None  # obj
+    attr: str = ""  # название атрибута
+
+
+@dataclass
+class Subscript(ASTNode):
+    """Оиндексация: obj[index]"""
+    value: Optional[ASTNode] = None  # obj
+    slice: Optional[ASTNode] = None  # index
+
+
+@dataclass
 class Return(ASTNode):
     """Оператор return"""
     value: Optional[ASTNode] = None
