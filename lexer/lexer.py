@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Лексический анализатор для Python 2/3
+ФАЗА 1 ИСПРАВЛЕНИЯ: корректная обработка INDENT/DEDENT
 """
 
 from typing import List, Optional
@@ -10,7 +11,7 @@ from identifier_table import IdentifierTable
 
 
 class Lexer:
-    """Лексический анализатор с поддержкой отступов"""
+    """Лексический анализатор с поддержкой отступов (исправленная версия)"""
     
     def __init__(self, source: str):
         self.source = source
@@ -26,6 +27,7 @@ class Lexer:
         # Стек отступов для INDENT/DEDENT
         self.indent_stack = [0]
         self.at_line_start = True
+        self.pending_dedents = 0  # Отложенные DEDENT токены
         
     def current_char(self) -> Optional[str]:
         """Текущий символ"""
@@ -48,7 +50,6 @@ class Lexer:
             if ch == '\n':
                 self.line += 1
                 self.column = 1
-                self.at_line_start = True
             else:
                 self.column += 1
             return ch
@@ -66,7 +67,7 @@ class Lexer:
                 break
     
     def handle_indentation(self):
-        """Обработка отступов в начале строки"""
+        """Обработка отступов в начале строки - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         if not self.at_line_start:
             return
         
@@ -78,34 +79,42 @@ class Lexer:
         while self.current_char() in (' ', '\t'):
             if self.current_char() == ' ':
                 indent_level += 1
-            else:  # tab
+            else:  # tab = 4 пробела
                 indent_level += 4
             self.advance()
         
-        # Пропустить пустые строки и комментарии
+        # Пропустить пустые строки и комментарии (они не влияют на отступ)
         if self.current_char() in ('\n', '#', None):
             return
         
+        # Теперь мы знаем, что это реальная строка кода
         self.at_line_start = False
         
         # Сравниваем с текущим уровнем отступа
         current_indent = self.indent_stack[-1]
         
         if indent_level > current_indent:
+            # Вход в новый блок - может быть только на 1 уровень глубже
+            if indent_level != current_indent + 4 and indent_level != current_indent + 1:
+                # Допускаем произвольное увеличение (не очень строго, как в реальном Python)
+                pass
             self.indent_stack.append(indent_level)
             self.tokens.append(Token(TokenType.INDENT, indent_level, start_line, start_col))
             # Входим в новую область видимости
             self.identifier_table.enter_scope()
+            
         elif indent_level < current_indent:
+            # Выход из блока(ов)
             while len(self.indent_stack) > 1 and self.indent_stack[-1] > indent_level:
                 self.indent_stack.pop()
-                self.tokens.append(Token(TokenType.DEDENT, indent_level, start_line, start_col))
+                self.tokens.append(Token(TokenType.DEDENT, 0, start_line, start_col))
                 # Выходим из области видимости
                 self.identifier_table.exit_scope()
             
+            # Проверка корректности отступа
             if self.indent_stack[-1] != indent_level:
                 self.errors.append(
-                    f"Строка {start_line}:{start_col}: Некорректный уровень отступа"
+                    f"Строка {start_line}:{start_col}: Некорректный уровень отступа (ожидался {self.indent_stack[-1]}, получен {indent_level})"
                 )
     
     def read_identifier_or_keyword(self) -> Token:
@@ -196,6 +205,12 @@ class Lexer:
             while self.current_char() and self.current_char().isdigit():
                 value += self.advance()
         
+        # Python 2: long suffix L или l
+        has_long_suffix = False
+        if self.current_char() in ('L', 'l'):
+            has_long_suffix = True
+            self.advance()  # пропускаем L, в Python 3 это не нужно
+        
         try:
             num_value = float(value) if is_float else int(value)
             return Token(TokenType.NUMBER, num_value, start_line, start_column)
@@ -253,10 +268,11 @@ class Lexer:
         return Token(TokenType.STRING, value, start_line, start_column)
     
     def scan(self) -> List[Token]:
-        """Главный цикл сканирования"""
+        """Главный цикл сканирования - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         while self.pos < len(self.source):
             # Обработка отступов в начале строки
-            self.handle_indentation()
+            if self.at_line_start:
+                self.handle_indentation()
             
             ch = self.current_char()
             if not ch:
@@ -265,18 +281,21 @@ class Lexer:
             start_line = self.line
             start_col = self.column
             
-            # Пробелы
+            # Пробелы (только между токенами, не в начале строки)
             if ch in (' ', '\t'):
                 self.skip_whitespace()
                 continue
             
             # Новая строка
             if ch == '\n':
-                self.tokens.append(Token(TokenType.NEWLINE, '\n', start_line, start_col))
+                # Добавляем NEWLINE только если последний токен не NEWLINE, INDENT, DEDENT
+                if self.tokens and self.tokens[-1].type not in (TokenType.NEWLINE, TokenType.INDENT, TokenType.DEDENT):
+                    self.tokens.append(Token(TokenType.NEWLINE, '\n', start_line, start_col))
                 self.advance()
+                self.at_line_start = True
                 continue
             
-            # Комментарии
+            # Комментарии (пропускаются полностью)
             if ch == '#':
                 while self.current_char() and self.current_char() != '\n':
                     self.advance()
@@ -310,6 +329,10 @@ class Lexer:
             elif ch == '<' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.LE, '<=', start_line, start_col))
+            elif ch == '<' and self.current_char() == '>':
+                # Python 2: <> = not equal
+                self.advance()
+                self.tokens.append(Token(TokenType.NE, '<>', start_line, start_col))
             elif ch == '>' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.GE, '>=', start_line, start_col))
@@ -319,24 +342,24 @@ class Lexer:
             elif ch == '-' and self.current_char() == '=':
                 self.advance()
                 self.tokens.append(Token(TokenType.MINUS_ASSIGN, '-=', start_line, start_col))
-            elif ch == '*' and self.current_char() == '=':
-                self.advance()
-                self.tokens.append(Token(TokenType.MULT_ASSIGN, '*=', start_line, start_col))
-            elif ch == '/' and self.current_char() == '=':
-                self.advance()
-                self.tokens.append(Token(TokenType.DIV_ASSIGN, '/=', start_line, start_col))
-            elif ch == '%' and self.current_char() == '=':
-                self.advance()
-                self.tokens.append(Token(TokenType.MOD_ASSIGN, '%=', start_line, start_col))
-            elif ch == '*' and self.current_char() == '*':
-                self.advance()
-                self.tokens.append(Token(TokenType.POWER, '**', start_line, start_col))
-            elif ch == '/' and self.current_char() == '/':
-                self.advance()
-                self.tokens.append(Token(TokenType.FLOOR_DIVIDE, '//', start_line, start_col))
             elif ch == '-' and self.current_char() == '>':
                 self.advance()
                 self.tokens.append(Token(TokenType.ARROW, '->', start_line, start_col))
+            elif ch == '*' and self.current_char() == '=':
+                self.advance()
+                self.tokens.append(Token(TokenType.MULT_ASSIGN, '*=', start_line, start_col))
+            elif ch == '*' and self.current_char() == '*':
+                self.advance()
+                self.tokens.append(Token(TokenType.POWER, '**', start_line, start_col))
+            elif ch == '/' and self.current_char() == '=':
+                self.advance()
+                self.tokens.append(Token(TokenType.DIV_ASSIGN, '/=', start_line, start_col))
+            elif ch == '/' and self.current_char() == '/':
+                self.advance()
+                self.tokens.append(Token(TokenType.FLOOR_DIVIDE, '//', start_line, start_col))
+            elif ch == '%' and self.current_char() == '=':
+                self.advance()
+                self.tokens.append(Token(TokenType.MOD_ASSIGN, '%=', start_line, start_col))
             # Односимвольные
             elif ch == '+':
                 self.tokens.append(Token(TokenType.PLUS, '+', start_line, start_col))
@@ -380,11 +403,15 @@ class Lexer:
                 )
                 self.tokens.append(Token(TokenType.UNKNOWN, ch, start_line, start_col))
         
-        # Добавляем DEDENT для всех оставшихся уровней отступа
+        # Генерируем DEDENT для всех оставшихся уровней отступа
         while len(self.indent_stack) > 1:
             self.indent_stack.pop()
             self.tokens.append(Token(TokenType.DEDENT, 0, self.line, self.column))
             self.identifier_table.exit_scope()
+        
+        # Добавляем финальный NEWLINE если последний токен не NEWLINE
+        if self.tokens and self.tokens[-1].type not in (TokenType.NEWLINE, TokenType.DEDENT):
+            self.tokens.append(Token(TokenType.NEWLINE, '\n', self.line, self.column))
         
         # Финальный EOF
         self.tokens.append(Token(TokenType.EOF, '', self.line, self.column))
