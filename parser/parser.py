@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Синтаксический анализатор Python
+Синтаксический анализатор Python с поддержкой вложенных структур
+Вариант 12: полная поддержка scope, корректная обработка INDENT/DEDENT
 """
 
 from typing import List, Optional
@@ -10,12 +11,14 @@ from .ast_nodes import *
 
 
 class Parser:
-    """Синтаксический анализатор Python с подробными ошибками"""
+    """Синтаксический анализатор Python с защитой от infinite loops и правильным scope management"""
     
     def __init__(self, tokens: List[Token]):
         self.tokens = tokens
         self.pos = 0
         self.errors: List[str] = []
+        self._recursion_depth = 0
+        self._max_recursion_depth = 1000  # Защита от бесконечной рекурсии
     
     def current_token(self) -> Token:
         """Текущий токен"""
@@ -67,7 +70,7 @@ class Parser:
             # Сохраняем позицию для защиты от зацикливания
             old_pos = self.pos
             
-            stmt = self.parse_statement()
+            stmt = self._parse_statement()
             if stmt:
                 program.body.append(stmt)
             
@@ -82,50 +85,68 @@ class Parser:
         
         return program
     
-    def parse_statement(self) -> Optional[ASTNode]:
-        """Разбор одной инструкции"""
+    def _parse_statement(self) -> Optional[ASTNode]:
+        """Разбор одной инструкции (внутренняя функция с защитой рекурсии)"""
+        # Защита от бесконечной рекурсии
+        if self._recursion_depth > self._max_recursion_depth:
+            token = self.current_token()
+            self.errors.append(
+                f"Строка {token.line}:{token.column}: Слишком глубокая вложенность"
+            )
+            return None
+        
+        self._recursion_depth += 1
+        try:
+            result = self._parse_statement_impl()
+        finally:
+            self._recursion_depth -= 1
+        
+        return result
+    
+    def _parse_statement_impl(self) -> Optional[ASTNode]:
+        """Реальная реализация parse_statement"""
         token = self.current_token()
         
         # Определение функции
         if token.type == TokenType.DEF:
-            return self.parse_function_def()
+            return self._parse_function_def()
         
         # Определение класса
         if token.type == TokenType.CLASS:
-            return self.parse_class_def()
+            return self._parse_class_def()
         
         # Условный оператор
         if token.type == TokenType.IF:
-            return self.parse_if()
+            return self._parse_if()
         
         # Цикл while
         if token.type == TokenType.WHILE:
-            return self.parse_while()
+            return self._parse_while()
         
         # Цикл for
         if token.type == TokenType.FOR:
-            return self.parse_for()
+            return self._parse_for()
         
         # Print (только Python 2)
         if token.type == TokenType.PRINT:
-            return self.parse_print()
+            return self._parse_print()
         
         # Return
         if token.type == TokenType.RETURN:
-            return self.parse_return()
+            return self._parse_return()
         
         # Import
         if token.type == TokenType.IMPORT:
-            return self.parse_import()
+            return self._parse_import()
         
         # From ... import
         if token.type == TokenType.FROM:
-            return self.parse_from_import()
+            return self._parse_from_import()
         
         # Присваивание или выражение
-        return self.parse_expression_statement()
+        return self._parse_expression_statement()
     
-    def parse_function_def(self) -> FunctionDef:
+    def _parse_function_def(self) -> FunctionDef:
         """Разбор определения функции"""
         func_token = self.advance()  # def
         func_def = FunctionDef(line=func_token.line, column=func_token.column)
@@ -155,12 +176,12 @@ class Parser:
         
         # Тело функции
         self.expect(TokenType.INDENT)
-        func_def.body = self.parse_block()
+        func_def.body = self._parse_block()
         self.expect(TokenType.DEDENT)
         
         return func_def
     
-    def parse_class_def(self) -> ClassDef:
+    def _parse_class_def(self) -> ClassDef:
         """Разбор определения класса"""
         class_token = self.advance()  # class
         class_def = ClassDef(line=class_token.line, column=class_token.column)
@@ -192,35 +213,35 @@ class Parser:
         
         # Тело класса
         self.expect(TokenType.INDENT)
-        class_def.body = self.parse_block()
+        class_def.body = self._parse_block()
         self.expect(TokenType.DEDENT)
         
         return class_def
     
-    def parse_if(self) -> If:
+    def _parse_if(self) -> If:
         """Разбор if/elif/else"""
         if_token = self.advance()  # if
         if_node = If(line=if_token.line, column=if_token.column)
         
         # Условие
-        if_node.condition = self.parse_expression()
+        if_node.condition = self._parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
         # Тело if
         self.expect(TokenType.INDENT)
-        if_node.then_body = self.parse_block()
+        if_node.then_body = self._parse_block()
         self.expect(TokenType.DEDENT)
         
         # elif блоки
         while self.current_token().type == TokenType.ELIF:
             self.advance()  # elif
-            elif_condition = self.parse_expression()
+            elif_condition = self._parse_expression()
             self.expect(TokenType.COLON)
             self.expect(TokenType.NEWLINE)
             
             self.expect(TokenType.INDENT)
-            elif_body = self.parse_block()
+            elif_body = self._parse_block()
             self.expect(TokenType.DEDENT)
             
             if_node.elif_blocks.append((elif_condition, elif_body))
@@ -232,29 +253,29 @@ class Parser:
             self.expect(TokenType.NEWLINE)
             
             self.expect(TokenType.INDENT)
-            if_node.else_body = self.parse_block()
+            if_node.else_body = self._parse_block()
             self.expect(TokenType.DEDENT)
         
         return if_node
     
-    def parse_while(self) -> While:
+    def _parse_while(self) -> While:
         """Разбор цикла while"""
         while_token = self.advance()  # while
         while_node = While(line=while_token.line, column=while_token.column)
         
         # Условие
-        while_node.condition = self.parse_expression()
+        while_node.condition = self._parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
         # Тело цикла
         self.expect(TokenType.INDENT)
-        while_node.body = self.parse_block()
+        while_node.body = self._parse_block()
         self.expect(TokenType.DEDENT)
         
         return while_node
     
-    def parse_for(self) -> For:
+    def _parse_for(self) -> For:
         """Разбор цикла for"""
         for_token = self.advance()  # for
         for_node = For(line=for_token.line, column=for_token.column)
@@ -267,18 +288,18 @@ class Parser:
         self.expect(TokenType.IN)
         
         # Итерируемый объект
-        for_node.iter = self.parse_expression()
+        for_node.iter = self._parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
         # Тело цикла
         self.expect(TokenType.INDENT)
-        for_node.body = self.parse_block()
+        for_node.body = self._parse_block()
         self.expect(TokenType.DEDENT)
         
         return for_node
     
-    def parse_print(self) -> Print:
+    def _parse_print(self) -> Print:
         """Разбор оператора print (Python 2)"""
         print_token = self.advance()  # print
         print_node = Print(line=print_token.line, column=print_token.column)
@@ -287,7 +308,7 @@ class Parser:
         if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
             while True:
                 old_pos = self.pos
-                arg = self.parse_expression()
+                arg = self._parse_expression()
                 
                 if arg:
                     print_node.args.append(arg)
@@ -307,18 +328,18 @@ class Parser:
         
         return print_node
     
-    def parse_return(self) -> Return:
+    def _parse_return(self) -> Return:
         """Разбор оператора return"""
         return_token = self.advance()  # return
         return_node = Return(line=return_token.line, column=return_token.column)
         
         # Значение (опционально)
         if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
-            return_node.value = self.parse_expression()
+            return_node.value = self._parse_expression()
         
         return return_node
     
-    def parse_import(self) -> Import:
+    def _parse_import(self) -> Import:
         """Разбор import"""
         import_token = self.advance()  # import
         import_node = Import(line=import_token.line, column=import_token.column)
@@ -336,7 +357,7 @@ class Parser:
         
         return import_node
     
-    def parse_from_import(self) -> ImportFrom:
+    def _parse_from_import(self) -> ImportFrom:
         """Разбор from ... import ..."""
         from_token = self.advance()  # from
         import_from = ImportFrom(line=from_token.line, column=from_token.column)
@@ -361,9 +382,9 @@ class Parser:
         
         return import_from
     
-    def parse_expression_statement(self) -> Optional[ASTNode]:
+    def _parse_expression_statement(self) -> Optional[ASTNode]:
         """Разбор выражения или присваивания"""
-        expr = self.parse_expression()
+        expr = self._parse_expression()
         
         if not expr:
             return None
@@ -371,7 +392,7 @@ class Parser:
         # Проверка на присваивание
         if self.current_token().type == TokenType.ASSIGN:
             self.advance()
-            value = self.parse_expression()
+            value = self._parse_expression()
             if value:
                 return Assign(target=expr, value=value, 
                              line=self.current_token().line, 
@@ -379,56 +400,56 @@ class Parser:
         
         return expr
     
-    def parse_expression(self) -> Optional[ASTNode]:
-        """Разбор выражения"""
-        return self.parse_or_expr()
+    def _parse_expression(self) -> Optional[ASTNode]:
+        """Разбор выражения (точка входа)"""
+        return self._parse_or_expr()
     
-    def parse_or_expr(self) -> Optional[ASTNode]:
+    def _parse_or_expr(self) -> Optional[ASTNode]:
         """Логическое OR"""
-        left = self.parse_and_expr()
+        left = self._parse_and_expr()
         
         if not left:
             return None
         
         while self.current_token().type == TokenType.OR:
             op_token = self.advance()
-            right = self.parse_and_expr()
+            right = self._parse_and_expr()
             if right:
                 left = BinOp(left=left, op='or', right=right, 
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_and_expr(self) -> Optional[ASTNode]:
+    def _parse_and_expr(self) -> Optional[ASTNode]:
         """Логическое AND"""
-        left = self.parse_not_expr()
+        left = self._parse_not_expr()
         
         if not left:
             return None
         
         while self.current_token().type == TokenType.AND:
             op_token = self.advance()
-            right = self.parse_not_expr()
+            right = self._parse_not_expr()
             if right:
                 left = BinOp(left=left, op='and', right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_not_expr(self) -> Optional[ASTNode]:
+    def _parse_not_expr(self) -> Optional[ASTNode]:
         """Логическое NOT"""
         if self.current_token().type == TokenType.NOT:
             op_token = self.advance()
-            operand = self.parse_not_expr()
+            operand = self._parse_not_expr()
             if operand:
                 return UnaryOp(op='not', operand=operand,
                               line=op_token.line, column=op_token.column)
         
-        return self.parse_comparison()
+        return self._parse_comparison()
     
-    def parse_comparison(self) -> Optional[ASTNode]:
+    def _parse_comparison(self) -> Optional[ASTNode]:
         """Сравнения"""
-        left = self.parse_add_expr()
+        left = self._parse_add_expr()
         
         if not left:
             return None
@@ -439,32 +460,32 @@ class Parser:
         
         while self.current_token().type in comp_ops:
             op_token = self.advance()
-            right = self.parse_add_expr()
+            right = self._parse_add_expr()
             if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_add_expr(self) -> Optional[ASTNode]:
+    def _parse_add_expr(self) -> Optional[ASTNode]:
         """Сложение и вычитание"""
-        left = self.parse_mult_expr()
+        left = self._parse_mult_expr()
         
         if not left:
             return None
         
         while self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
-            right = self.parse_mult_expr()
+            right = self._parse_mult_expr()
             if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_mult_expr(self) -> Optional[ASTNode]:
+    def _parse_mult_expr(self) -> Optional[ASTNode]:
         """Умножение, деление, остаток"""
-        left = self.parse_power_expr()
+        left = self._parse_power_expr()
         
         if not left:
             return None
@@ -474,41 +495,41 @@ class Parser:
         
         while self.current_token().type in ops:
             op_token = self.advance()
-            right = self.parse_power_expr()
+            right = self._parse_power_expr()
             if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_power_expr(self) -> Optional[ASTNode]:
+    def _parse_power_expr(self) -> Optional[ASTNode]:
         """Возведение в степень"""
-        left = self.parse_unary_expr()
+        left = self._parse_unary_expr()
         
         if not left:
             return None
         
         if self.current_token().type == TokenType.POWER:
             op_token = self.advance()
-            right = self.parse_power_expr()  # Правоассоциативно
+            right = self._parse_power_expr()  # Правоассоциативно
             if right:
                 return BinOp(left=left, op='**', right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def parse_unary_expr(self) -> Optional[ASTNode]:
+    def _parse_unary_expr(self) -> Optional[ASTNode]:
         """Унарные операторы"""
         if self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
-            operand = self.parse_unary_expr()
+            operand = self._parse_unary_expr()
             if operand:
                 return UnaryOp(op=op_token.value, operand=operand,
                               line=op_token.line, column=op_token.column)
         
-        return self.parse_primary()
+        return self._parse_primary()
     
-    def parse_primary(self) -> Optional[ASTNode]:
+    def _parse_primary(self) -> Optional[ASTNode]:
         """Первичные выражения"""
         token = self.current_token()
         
@@ -525,7 +546,7 @@ class Parser:
                 if self.current_token().type != TokenType.RPAREN:
                     while True:
                         old_pos = self.pos
-                        arg = self.parse_expression()
+                        arg = self._parse_expression()
                         
                         if arg:
                             call.args.append(arg)
@@ -562,7 +583,7 @@ class Parser:
         # Скобки
         if token.type == TokenType.LPAREN:
             self.advance()
-            expr = self.parse_expression()
+            expr = self._parse_expression()
             self.expect(TokenType.RPAREN)
             return expr
         
@@ -574,7 +595,7 @@ class Parser:
         self.advance()
         return None
     
-    def parse_block(self) -> List[ASTNode]:
+    def _parse_block(self) -> List[ASTNode]:
         """Разбор блока кода"""
         statements = []
         
@@ -587,7 +608,7 @@ class Parser:
             # Сохраняем позицию для защиты от зацикливания
             old_pos = self.pos
             
-            stmt = self.parse_statement()
+            stmt = self._parse_statement()
             if stmt:
                 statements.append(stmt)
             
