@@ -12,7 +12,7 @@
 7. unichr → chr
 8. except Type, e → except Type as e
 9. raise Type, msg → raise Type(msg)
-10. reduce ножно импортировать
+10. reduce нужно импортировать
 11. exec → exec()
 12. obj.attr и obj[index]
 """
@@ -22,7 +22,7 @@ from .ast_nodes import *
 
 
 class CodeGenerator:
-    """Наследиемые выражения обычно до данного исполнения (*, /, //, +, -, and, or, not)
+    """Наследуемые выражения обычно до данного исполнения (*, /, //, +, -, and, or, not)
     Операторы сравнения (==, !=, <>, <, <=, >, >=, is, in)
     Не требуют скобок внутри
     """
@@ -44,7 +44,7 @@ class CodeGenerator:
         """Генерирование кода из AST"""
         code_lines = []
         
-        # Добавляем importы для reduce если нужны
+        # Добавляем import для reduce если нужен
         needs_reduce = self._needs_reduce(program)
         if needs_reduce:
             code_lines.append("from functools import reduce\n")
@@ -261,35 +261,7 @@ class CodeGenerator:
             return expr.id
         
         elif isinstance(expr, Literal):
-            # Обычные литералы
-            if isinstance(expr.value, str):
-                return repr(expr.value)
-            elif isinstance(expr.value, bool):
-                return 'True' if expr.value else 'False'
-            elif expr.value is None:
-                return 'None'
-            elif isinstance(expr.value, (int, float)):
-                return str(expr.value)
-            # Коллекции
-            elif isinstance(expr.value, tuple) and len(expr.value) == 2:
-                coll_type, elements = expr.value
-                if coll_type == 'list':
-                    elem_strs = [self.generate_expression(e) for e in elements]
-                    return f"[{', '.join(elem_strs)}]"
-                elif coll_type == 'tuple':
-                    elem_strs = [self.generate_expression(e) for e in elements]
-                    if len(elem_strs) == 1:
-                        return f"({elem_strs[0]},)"
-                    else:
-                        return f"({', '.join(elem_strs)})"
-                elif coll_type == 'dict':
-                    pairs = []
-                    for k, v in elements:
-                        k_str = self.generate_expression(k)
-                        v_str = self.generate_expression(v)
-                        pairs.append(f"{k_str}: {v_str}")
-                    return f"{{{', '.join(pairs)}}}"
-            return str(expr.value)
+            return self._generate_literal(expr)
         
         elif isinstance(expr, Attribute):
             obj = self.generate_expression(expr.value)
@@ -312,12 +284,52 @@ class CodeGenerator:
         else:
             return ""
     
+    def _generate_literal(self, expr: Literal) -> str:
+        """Генерирование литерала (число, строка, коллекция)"""
+        value = expr.value
+        
+        # Простые типы
+        if isinstance(value, str):
+            return repr(value)
+        elif isinstance(value, bool):
+            return 'True' if value else 'False'
+        elif value is None:
+            return 'None'
+        elif isinstance(value, (int, float)):
+            return str(value)
+        
+        # Коллекции: ('list', [...]), ('dict', [...]), ('tuple', [...])
+        elif isinstance(value, tuple) and len(value) == 2:
+            coll_type, elements = value
+            
+            if coll_type == 'list':
+                elem_strs = [self.generate_expression(e) for e in elements]
+                return f"[{', '.join(elem_strs)}]"
+            
+            elif coll_type == 'tuple':
+                elem_strs = [self.generate_expression(e) for e in elements]
+                if len(elem_strs) == 1:
+                    return f"({elem_strs[0]},)"
+                else:
+                    return f"({', '.join(elem_strs)})"
+            
+            elif coll_type == 'dict':
+                pairs = []
+                for k, v in elements:
+                    k_str = self.generate_expression(k)
+                    v_str = self.generate_expression(v)
+                    pairs.append(f"{k_str}: {v_str}")
+                return f"{{{', '.join(pairs)}}}"
+        
+        # Неизвестный тип
+        return str(value)
+    
     def generate_binop(self, node: BinOp) -> str:
         """Генерирование бинарных операций"""
         left = self.generate_expression(node.left)
         right = self.generate_expression(node.right)
         
-        # Открымаяся рекурсия: если левые/правые же BinOp-ы, добавляем скобки
+        # Открывающаяся рекурсия: если левые/правые же BinOp-ы, добавляем скобки
         if isinstance(node.left, BinOp) and node.left.op not in self.BINARY_OPS_NO_PARENS:
             left = f"({left})"
         
