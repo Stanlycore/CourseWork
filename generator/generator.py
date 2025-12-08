@@ -261,10 +261,35 @@ class CodeGenerator:
             return expr.id
         
         elif isinstance(expr, Literal):
+            # Обычные литералы
             if isinstance(expr.value, str):
                 return repr(expr.value)
-            else:
+            elif isinstance(expr.value, bool):
+                return 'True' if expr.value else 'False'
+            elif expr.value is None:
+                return 'None'
+            elif isinstance(expr.value, (int, float)):
                 return str(expr.value)
+            # Коллекции
+            elif isinstance(expr.value, tuple) and len(expr.value) == 2:
+                coll_type, elements = expr.value
+                if coll_type == 'list':
+                    elem_strs = [self.generate_expression(e) for e in elements]
+                    return f"[{', '.join(elem_strs)}]"
+                elif coll_type == 'tuple':
+                    elem_strs = [self.generate_expression(e) for e in elements]
+                    if len(elem_strs) == 1:
+                        return f"({elem_strs[0]},)"
+                    else:
+                        return f"({', '.join(elem_strs)})"
+                elif coll_type == 'dict':
+                    pairs = []
+                    for k, v in elements:
+                        k_str = self.generate_expression(k)
+                        v_str = self.generate_expression(v)
+                        pairs.append(f"{k_str}: {v_str}")
+                    return f"{{{', '.join(pairs)}}}"
+            return str(expr.value)
         
         elif isinstance(expr, Attribute):
             obj = self.generate_expression(expr.value)
