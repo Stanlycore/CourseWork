@@ -1,79 +1,91 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Примеры Python2 программ для тестирования
+Примеры Python2 программ для тестирования транслятора
+10 рабочих примеров + 2 примера с ошибками
 """
 
 EXAMPLES = {
-    "Пример 1: Print статемент": '''
-# Python 2 print statement
+    "1️⃣ Print функция": '''# Python 2: print это оператор
+# Python 3: print это функция
 print "Hello, World!"
 print "The answer is", 42
+print "Without newline",
 x = 10
 print "x =", x
 ''',
 
-    "Пример 2: Функция и цикл": '''
-# Простая функция
-def greet(name):
-    print "Hello,", name
+    "2️⃣ Неравенство <> -> !=": '''# Оператор неравенства
+# Python 2: можно использовать <> или !=
+# Python 3: только !=
+x = 5
+y = 3
 
-# Цикл
-for i in range(5):
-    greet("User")
-    print "Iteration:", i
+if x <> y:
+    print "x not equal y"
+
+if x != y:
+    print "Alternative: not equal"
 ''',
 
-    "Пример 3: Условные операторы": '''
-# Условные операторы
-x = 10
-y = 20
+    "3️⃣ xrange -> range": '''# Диапазон и итерация
+# Python 2: xrange (ленивый), range (создает список)
+# Python 3: range (ленивый, как xrange)
+print "Counting with range:"
+for i in xrange(5):
+    print i
 
-if x < y:
-    print "x меньше y"
-elif x == y:
-    print "x равно y"
-else:
-    print "x больше y"
+print "\nList from range:"
+for j in range(1, 4):
+    print j
 ''',
 
-    "Пример 4: Вложенные циклы": '''
-# Вложенные циклы
-for i in range(3):
-    print "\nВнешний цикл:", i
-    for j in range(3):
-        print "  Внутренний цикл:", j
-        result = i * j
-        print "  Результат:", result
+    "4️⃣ dict методы: iterkeys, itervalues, iteritems": '''# Методы словаря
+# Python 2: iterkeys(), itervalues(), iteritems() - ленивые
+# Python 3: keys(), values(), items() - ленивые
+my_dict = {"a": 1, "b": 2, "c": 3}
+
+print "Keys:"
+for key in my_dict.iterkeys():
+    print key
+
+print "\nValues:"
+for value in my_dict.itervalues():
+    print value
+
+print "\nItems:"
+for k, v in my_dict.iteritems():
+    print k, ":", v
 ''',
 
-    "Пример 5: Функция с возвратом": '''
-# Функция с возвратом
-def factorial(n):
-    if n <= 1:
-        return 1
-    else:
-        return n * factorial(n - 1)
+    "5️⃣ raw_input -> input": '''# Функции ввода
+# Python 2: raw_input() для строк, input() для выражений
+# Python 3: input() для строк, eval(input()) для выражений
+name = raw_input("Enter your name: ")
+print "Hello,", name
 
-print "5! =", factorial(5)
-print "10! =", factorial(10)
+print "Type a number:"
+value = raw_input()
+print "You entered:", value
 ''',
 
-    "Пример 6: Работа со списками": '''
-# Работа со списками
-numbers = range(1, 11)
-total = 0
+    "6️⃣ Списки, кортежи, словари": '''# Коллекции
+# Синтаксис одинаков в Python2 и Python3
+list_data = [1, 2, 3, 4, 5]
+tuple_data = (10, 20, 30)
+dict_data = {"x": 100, "y": 200}
 
-for num in numbers:
-    total = total + num
-    print "Число:", num
-    print "Сумма:", total
+print "List:", list_data
+print "Tuple:", tuple_data
+print "Dict:", dict_data
 
-print "\nИтоговая сумма:", total
+print "\nAccessing:"
+print "list_data[0] =", list_data[0]
+print "tuple_data[1] =", tuple_data[1]
+print "dict_data['x'] =", dict_data['x']
 ''',
 
-    "Пример 7: Класс и объекты": '''
-# Простой класс
+    "7️⃣ Класс и объекты": '''# Классы и атрибуты
 class Person:
     def __init__(self, name, age):
         self.name = name
@@ -82,41 +94,46 @@ class Person:
     def greet(self):
         print "Hello, my name is", self.name
         print "I am", self.age, "years old"
+    
+    def birthday(self):
+        self.age = self.age + 1
+        print "Happy birthday!"
 
 p1 = Person("Alice", 25)
 p1.greet()
-
-p2 = Person("Bob", 30)
-p2.greet()
+p1.birthday()
+p1.greet()
 ''',
 
-    "Пример 8: While цикл": '''
-# While цикл
-counter = 0
-max_count = 5
-
-while counter < max_count:
-    print "Счетчик:", counter
-    counter = counter + 1
-
-print "Цикл завершен"
+    "8️⃣ Вложенные циклы и логика": '''# Вложенные циклы с условиями
+print "Nested loops:"
+for i in xrange(3):
+    print "\nOuter loop:", i
+    for j in xrange(3):
+        if i * j > 0:
+            print "  Inner:", i, "*", j, "=", i * j
+        else:
+            print "  Skip (zero)"
 ''',
 
-    "Пример 9: Математические операции": '''
-# Математические вычисления
-a = 10
-b = 3
+    "9️⃣ Функции с возвратом": '''# Функции
+def factorial(n):
+    if n <= 1:
+        return 1
+    else:
+        return n * factorial(n - 1)
 
-print "a + b =", a + b
-print "a - b =", a - b
-print "a * b =", a * b
-print "a / b =", a / b
-print "a % b =", a % b
-print "a ** b =", a ** b
+def fibonacci(n):
+    if n <= 1:
+        return n
+    else:
+        return fibonacci(n - 1) + fibonacci(n - 2)
+
+print "5! =", factorial(5)
+print "Fibonacci(7) =", fibonacci(7)
 ''',
 
-    "Пример 10: Сложная программа": '''
-# Калькулятор с функциями
+    "🔟 Комплексная программа": '''# Калькулятор с функциями
 def add(x, y):
     return x + y
 
@@ -128,11 +145,12 @@ def multiply(x, y):
 
 def divide(x, y):
     if y == 0:
-        print "Ошибка: деление на ноль"
-        return None
+        print "Error: division by zero"
+        return 0
     else:
         return x / y
 
+print "Calculator:"
 print "10 + 5 =", add(10, 5)
 print "10 - 5 =", subtract(10, 5)
 print "10 * 5 =", multiply(10, 5)
@@ -140,19 +158,19 @@ print "10 / 5 =", divide(10, 5)
 print "10 / 0 =", divide(10, 0)
 ''',
 
-    "❌ Пример 11: Ошибки (неверный отступ)": '''
-# Некорректный отступ
-def test():
-print "This will cause error"
-  print "Incorrect indentation"
-''',
-
-    "❌ Пример 12: Ошибки (синтаксис)": '''
-# Синтаксические ошибки
+    "❌ Ошибка: неверный синтаксис if": '''# Синтаксическая ошибка: отсутствует двоеточие
 if x < 10
-    print "Missing colon"
+    print "x is less than 10"
 
 for i in range(5)
     print i
-'''
+''',
+
+    "❌ Ошибка: неверный отступ": '''# Ошибка отступа
+def test():
+print "Missing indentation"
+  print "Wrong indentation"
+
+test()
+''',
 }
