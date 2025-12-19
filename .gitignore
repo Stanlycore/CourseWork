@@ -32,7 +32,7 @@ PIPFILE.lock
 # OS
 .DS_Store
 Thumbs.db
-
+logs/
 # Temporary files
 *.tmp
 *.bak
