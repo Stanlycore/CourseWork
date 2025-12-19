@@ -200,6 +200,7 @@ class TranslatorGUI:
         
         self._setup_ui()
         self._setup_styles()
+        self._setup_shortcuts()
         self._load_first_example()
     
     def _setup_ui(self):
@@ -246,10 +247,10 @@ class TranslatorGUI:
         self.example_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.example_combo.bind('<<ComboboxSelected>>', self._on_example_selected)
         
-        # Поле ввода
+        # Поле ввода (укрупнённый шрифт)
         self.input_text = scrolledtext.ScrolledText(
             left_frame, width=50, height=25, wrap=tk.WORD,
-            font=('Courier New', 11)
+            font=('Courier New', 14)
         )
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=5)
         
@@ -270,9 +271,20 @@ class TranslatorGUI:
         
         self.output_text = scrolledtext.ScrolledText(
             output_frame, width=50, height=15, wrap=tk.WORD,
-            font=('Courier New', 11), state=tk.DISABLED
+            font=('Courier New', 14), state=tk.DISABLED
         )
         self.output_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Панель кнопок под выводом
+        output_buttons = ttk.Frame(output_frame)
+        output_buttons.pack(fill=tk.X, pady=(5, 0))
+        
+        self.copy_output_btn = ttk.Button(
+            output_buttons,
+            text="Копировать в буфер обмена",
+            command=self._copy_output_to_clipboard
+        )
+        self.copy_output_btn.pack(side=tk.RIGHT)
         
         # Консоль ошибок
         console_frame = ttk.LabelFrame(right_paned, text="Консоль", padding=10)
@@ -280,7 +292,7 @@ class TranslatorGUI:
         
         self.console_text = scrolledtext.ScrolledText(
             console_frame, height=8, wrap=tk.WORD,
-            font=('Courier New', 10), state=tk.DISABLED
+            font=('Courier New', 12), state=tk.DISABLED
         )
         self.console_text.pack(fill=tk.BOTH, expand=True)
     
@@ -324,7 +336,7 @@ class TranslatorGUI:
         analysis_notebook.add(tree_text_frame, text="📄 Дерево (текст)")
         
         self.tree_text = scrolledtext.ScrolledText(
-            tree_text_frame, wrap=tk.WORD, font=('Courier New', 10)
+            tree_text_frame, wrap=tk.WORD, font=('Courier New', 12)
         )
         self.tree_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -394,7 +406,7 @@ class TranslatorGUI:
         except tk.TclError:
             pass
         
-        style.configure('Accent.TButton', font=('Arial', 11, 'bold'))
+        style.configure('Accent.TButton', font=('Arial', 12, 'bold'))
         
         # Цветовые теги для токенов
         self.tokens_tree.tag_configure('keyword', background='#E3F2FD')
@@ -404,9 +416,56 @@ class TranslatorGUI:
         self.tokens_tree.tag_configure('error', background='#FFEBEE')
         
         # Теги для консоли
-        self.console_text.tag_configure('error', foreground='#D32F2F', font=('Courier New', 10, 'bold'))
-        self.console_text.tag_configure('success', foreground='#388E3C', font=('Courier New', 10, 'bold'))
-        self.console_text.tag_configure('warning', foreground='#F57C00', font=('Courier New', 10, 'bold'))
+        self.console_text.tag_configure('error', foreground='#D32F2F', font=('Courier New', 12, 'bold'))
+        self.console_text.tag_configure('success', foreground='#388E3C', font=('Courier New', 12, 'bold'))
+        self.console_text.tag_configure('warning', foreground='#F57C00', font=('Courier New', 12, 'bold'))
+    
+    def _setup_shortcuts(self):
+        """Горячие клавиши для полей ввода/вывода"""
+        # Стандартные Ctrl+A/C/V работают в современных Tkinter, но явно их продублируем
+        for widget in (self.input_text, self.output_text, self.console_text, self.tree_text):
+            widget.bind('<Control-a>', self._select_all)
+            widget.bind('<Control-A>', self._select_all)
+            widget.bind('<Control-c>', self._copy)
+            widget.bind('<Control-C>', self._copy)
+            widget.bind('<Control-v>', self._paste)
+            widget.bind('<Control-V>', self._paste)
+    
+    def _select_all(self, event):
+        widget = event.widget
+        widget.tag_add('sel', '1.0', 'end-1c')
+        return 'break'
+    
+    def _copy(self, event):
+        widget = event.widget
+        try:
+            text = widget.get('sel.first', 'sel.last')
+        except tk.TclError:
+            return 'break'
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        return 'break'
+    
+    def _paste(self, event):
+        widget = event.widget
+        try:
+            text = self.root.clipboard_get()
+        except tk.TclError:
+            return 'break'
+        widget.insert('insert', text)
+        return 'break'
+    
+    def _copy_output_to_clipboard(self):
+        """Скопировать Python 3 код в буфер обмена"""
+        self.output_text.configure(state=tk.NORMAL)
+        text = self.output_text.get('1.0', 'end-1c')
+        self.output_text.configure(state=tk.DISABLED)
+        if text.strip():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self._log("Код скопирован в буфер обмена", 'success')
+        else:
+            self._log("Нет кода для копирования", 'warning')
     
     def _load_first_example(self):
         """Загрузить первый пример"""
