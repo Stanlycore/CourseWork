@@ -251,28 +251,61 @@ class Parser:
         return for_node
     
     def parse_print(self) -> Print:
-        """Разбор оператора print (Python 2)"""
+        """Разбор оператора print (Python 2)
+        
+        Синтаксис: print [expr [, expr]*] [,]
+        - expr, expr, expr  - выведет и новую строку
+        - expr, expr,       - выведет БЕЗ новой строки (trailing comma)
+        """
         print_token = self.advance()  # print
         print_node = Print(line=print_token.line, column=print_token.column)
         
-        if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
-            while True:
-                old_pos = self.pos
-                arg = self.parse_expression()
+        # Если после print сразу NEWLINE/EOF/DEDENT, то просто print()
+        if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+            return print_node
+        
+        # Разбираем список аргументов, разделённых запятыми
+        while True:
+            # Если токен - это что-то, что не может быть началом выражения
+            # (например, NEWLINE, EOF, DEDENT, ключевое слово), выходим
+            if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                break
+            
+            # Пытаемся разобрать выражение
+            arg = self.parse_expression()
+            if arg:
+                print_node.args.append(arg)
+            else:
+                # Если не удалось разобрать, значит синтаксическая ошибка
+                token = self.current_token()
+                self.errors.append(
+                    f"Строка {token.line}:{token.column}: "
+                    f"Ожидается выражение в print, но получен токен {token.type.name}"
+                )
+                break
+            
+            # Смотрим, что после выражения
+            if self.current_token().type == TokenType.COMMA:
+                self.advance()  # consume comma
                 
-                if arg:
-                    print_node.args.append(arg)
-                
-                if self.pos == old_pos:
+                # Проверяем, не идёт ли после запятой конец инструкции
+                # (это означает trailing comma)
+                if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                    print_node.newline = False  # trailing comma = no newline
                     break
-                
-                if self.current_token().type == TokenType.COMMA:
-                    self.advance()
-                    if self.current_token().type == TokenType.NEWLINE:
-                        print_node.newline = False
-                        break
-                else:
-                    break
+                # Иначе ожидается ещё одно выражение (цикл продолжится)
+            else:
+                # Нет запятой - это конец списка аргументов
+                # Проверяем, не стоит ли здесь неожиданный токен
+                # (это ошибка вроде 'print value1 value2' без запятой)
+                if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                    token = self.current_token()
+                    self.errors.append(
+                        f"Строка {token.line}:{token.column}: "
+                        f"Ожидается запятая или конец инструкции, но получен токен {token.type.name}. "
+                        f"Возможно, в print забыли запятую между аргументами."
+                    )
+                break
         
         return print_node
     
