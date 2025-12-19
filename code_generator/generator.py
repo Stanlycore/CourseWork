@@ -207,9 +207,20 @@ class CodeGenerator:
     
     def generate_print(self, node: Print) -> str:
         """Генерирование print → print() в Python 3"""
-        args = [self.generate_expression(arg) for arg in node.args]
+        # Если в списке аргументов образовалось что‑то синтаксически странное,
+        # стараемся не генерировать молча неверный код.
+        cleaned_args: List[str] = []
+        for arg in node.args:
+            expr = self.generate_expression(arg)
+            if not expr:
+                # добавим в список ошибок и пропустим аргумент
+                self.errors.append(
+                    f"Проблема при генерации аргумента print на позиции {arg.line}:{arg.column}"
+                )
+                continue
+            cleaned_args.append(expr)
         
-        params = ', '.join(args)
+        params = ', '.join(cleaned_args)
         if params:
             code = f"{self.indent()}print({params}"
         else:
