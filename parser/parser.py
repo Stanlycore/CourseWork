@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Синтаксический анализатор Python с поддержкой вложенных структур
-Вариант 12: полная поддержка scope, корректная обработка INDENT/DEDENT
-ФАЗА 1 ИСПРАВЛЕНИЯ: null-checking и защита рекурсии
+Синтаксический анализатор Python
 """
 
 from typing import List, Optional
@@ -12,14 +10,12 @@ from .ast_nodes import *
 
 
 class Parser:
-    """Синтаксический анализатор Python с защитой от infinite loops и правильным scope management"""
+    """Синтаксический анализатор Python с подробными ошибками"""
     
     def __init__(self, tokens: List[Token]):
         self.tokens = tokens
         self.pos = 0
         self.errors: List[str] = []
-        self._recursion_depth = 0
-        self._max_recursion_depth = 100  # Защита от бесконечной рекурсии
     
     def current_token(self) -> Token:
         """Текущий токен"""
@@ -49,7 +45,7 @@ class Parser:
         
         self.errors.append(
             f"Строка {token.line}:{token.column}: "
-            f"Ожидался {token_type.name}, но получен {token.type.name} ({token.value})"
+            f"Ожидался {token_type.name}, но получен {token.type.name}"
         )
         return None
     
@@ -68,14 +64,11 @@ class Parser:
             if self.current_token().type == TokenType.EOF:
                 break
             
-            # Сохраняем позицию для защиты от зацыкливания
             old_pos = self.pos
-            
-            stmt = self._parse_statement()
-            if stmt is not None:  # Эвличная проверка на None
+            stmt = self.parse_statement()
+            if stmt:
                 program.body.append(stmt)
             
-            # КРИТИЧЕСКО ВАЖНО: если позиция не изменилась, принудительно продвигаемся
             if self.pos == old_pos:
                 token = self.current_token()
                 self.errors.append(
@@ -86,95 +79,60 @@ class Parser:
         
         return program
     
-    def _parse_statement(self) -> Optional[ASTNode]:
-        """Разбор одной инструкции (внутренняя функция с защитой рекурсии)"""
-        # Защита от бесконечной рекурсии
-        if self._recursion_depth >= self._max_recursion_depth:
-            token = self.current_token()
-            self.errors.append(
-                f"Строка {token.line}:{token.column}: Слишком глубокая вложенность (>{self._max_recursion_depth})"
-            )
-            # Вернуть None, но не зацыкливаться
-            self.advance()
-            return None
-        
-        self._recursion_depth += 1
-        try:
-            result = self._parse_statement_impl()
-        finally:
-            self._recursion_depth -= 1
-        
-        return result
-    
-    def _parse_statement_impl(self) -> Optional[ASTNode]:
-        """Реальная реализация parse_statement"""
+    def parse_statement(self) -> Optional[ASTNode]:
+        """Разбор одной инструкции"""
         token = self.current_token()
         
-        # Pass statement
-        if token.type == TokenType.PASS:
-            pass_token = self.advance()
-            return Pass(line=pass_token.line, column=pass_token.column)
+        if token.type == TokenType.DEF:
+            return self.parse_function_def()
         
-        # Break statement
+        if token.type == TokenType.CLASS:
+            return self.parse_class_def()
+        
+        if token.type == TokenType.IF:
+            return self.parse_if()
+        
+        if token.type == TokenType.WHILE:
+            return self.parse_while()
+        
+        if token.type == TokenType.FOR:
+            return self.parse_for()
+        
+        if token.type == TokenType.PRINT:
+            return self.parse_print()
+        
+        if token.type == TokenType.RETURN:
+            return self.parse_return()
+        
         if token.type == TokenType.BREAK:
             break_token = self.advance()
             return Break(line=break_token.line, column=break_token.column)
         
-        # Continue statement
         if token.type == TokenType.CONTINUE:
-            cont_token = self.advance()
-            return Continue(line=cont_token.line, column=cont_token.column)
+            continue_token = self.advance()
+            return Continue(line=continue_token.line, column=continue_token.column)
         
-        # Определение функции
-        if token.type == TokenType.DEF:
-            return self._parse_function_def()
+        if token.type == TokenType.PASS:
+            pass_token = self.advance()
+            return Pass(line=pass_token.line, column=pass_token.column)
         
-        # Определение класса
-        if token.type == TokenType.CLASS:
-            return self._parse_class_def()
-        
-        # Условный оператор
-        if token.type == TokenType.IF:
-            return self._parse_if()
-        
-        # Цикл while
-        if token.type == TokenType.WHILE:
-            return self._parse_while()
-        
-        # Цикл for
-        if token.type == TokenType.FOR:
-            return self._parse_for()
-        
-        # Print (только Python 2)
-        if token.type == TokenType.PRINT:
-            return self._parse_print()
-        
-        # Return
-        if token.type == TokenType.RETURN:
-            return self._parse_return()
-        
-        # Import
         if token.type == TokenType.IMPORT:
-            return self._parse_import()
+            return self.parse_import()
         
-        # From ... import
         if token.type == TokenType.FROM:
-            return self._parse_from_import()
+            return self.parse_from_import()
         
-        # Присваивание или выражение
-        return self._parse_expression_statement()
+        return self.parse_expression_statement()
     
-    def _parse_function_def(self) -> FunctionDef:
+    def parse_function_def(self) -> FunctionDef:
         """Разбор определения функции"""
         func_token = self.advance()  # def
         func_def = FunctionDef(line=func_token.line, column=func_token.column)
         
-        # Имя функции
         name_token = self.expect(TokenType.IDENTIFIER)
         if name_token:
             func_def.name = name_token.value
         
-        # Параметры
         self.expect(TokenType.LPAREN)
         
         if self.current_token().type != TokenType.RPAREN:
@@ -192,24 +150,21 @@ class Parser:
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
-        # Тело функции
         self.expect(TokenType.INDENT)
-        func_def.body = self._parse_block()
+        func_def.body = self.parse_block()
         self.expect(TokenType.DEDENT)
         
         return func_def
     
-    def _parse_class_def(self) -> ClassDef:
+    def parse_class_def(self) -> ClassDef:
         """Разбор определения класса"""
         class_token = self.advance()  # class
         class_def = ClassDef(line=class_token.line, column=class_token.column)
         
-        # Имя класса
         name_token = self.expect(TokenType.IDENTIFIER)
         if name_token:
             class_def.name = name_token.value
         
-        # Базовые классы (опционально)
         if self.current_token().type == TokenType.LPAREN:
             self.advance()
             
@@ -229,141 +184,158 @@ class Parser:
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
-        # Тело класса
         self.expect(TokenType.INDENT)
-        class_def.body = self._parse_block()
+        class_def.body = self.parse_block()
         self.expect(TokenType.DEDENT)
         
         return class_def
     
-    def _parse_if(self) -> If:
+    def parse_if(self) -> If:
         """Разбор if/elif/else"""
         if_token = self.advance()  # if
         if_node = If(line=if_token.line, column=if_token.column)
         
-        # Условие
-        if_node.condition = self._parse_expression()
+        if_node.condition = self.parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
-        # Тело if
         self.expect(TokenType.INDENT)
-        if_node.then_body = self._parse_block()
+        if_node.then_body = self.parse_block()
         self.expect(TokenType.DEDENT)
         
-        # elif блоки
         while self.current_token().type == TokenType.ELIF:
             self.advance()  # elif
-            elif_condition = self._parse_expression()
+            elif_condition = self.parse_expression()
             self.expect(TokenType.COLON)
             self.expect(TokenType.NEWLINE)
             
             self.expect(TokenType.INDENT)
-            elif_body = self._parse_block()
+            elif_body = self.parse_block()
             self.expect(TokenType.DEDENT)
             
-            if elif_condition is not None:  # Эвличная проверка на None
-                if_node.elif_blocks.append((elif_condition, elif_body))
+            if_node.elif_blocks.append((elif_condition, elif_body))
         
-        # else блок
         if self.current_token().type == TokenType.ELSE:
             self.advance()  # else
             self.expect(TokenType.COLON)
             self.expect(TokenType.NEWLINE)
             
             self.expect(TokenType.INDENT)
-            if_node.else_body = self._parse_block()
+            if_node.else_body = self.parse_block()
             self.expect(TokenType.DEDENT)
         
         return if_node
     
-    def _parse_while(self) -> While:
+    def parse_while(self) -> While:
         """Разбор цикла while"""
         while_token = self.advance()  # while
         while_node = While(line=while_token.line, column=while_token.column)
         
-        # Условие
-        while_node.condition = self._parse_expression()
+        while_node.condition = self.parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
-        # Тело цикла
         self.expect(TokenType.INDENT)
-        while_node.body = self._parse_block()
+        while_node.body = self.parse_block()
         self.expect(TokenType.DEDENT)
         
         return while_node
     
-    def _parse_for(self) -> For:
+    def parse_for(self) -> For:
         """Разбор цикла for"""
         for_token = self.advance()  # for
         for_node = For(line=for_token.line, column=for_token.column)
         
-        # Переменная цикла
         target_token = self.expect(TokenType.IDENTIFIER)
         if target_token:
             for_node.target = Name(id=target_token.value, line=target_token.line, column=target_token.column)
         
         self.expect(TokenType.IN)
         
-        # Итерируемый объект
-        for_node.iter = self._parse_expression()
+        for_node.iter = self.parse_expression()
         self.expect(TokenType.COLON)
         self.expect(TokenType.NEWLINE)
         
-        # Тело цикла
         self.expect(TokenType.INDENT)
-        for_node.body = self._parse_block()
+        for_node.body = self.parse_block()
         self.expect(TokenType.DEDENT)
         
         return for_node
     
-    def _parse_print(self) -> Print:
-        """Разбор оператора print (Python 2)"""
+    def parse_print(self) -> Print:
+        """Разбор оператора print (Python 2)
+        
+        Синтаксис: print [expr [, expr]*] [,]
+        - expr, expr, expr  - выведет и новую строку
+        - expr, expr,       - выведет БЕЗ новой строки (trailing comma)
+        """
         print_token = self.advance()  # print
         print_node = Print(line=print_token.line, column=print_token.column)
         
-        # Аргументы
-        if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
-            while True:
-                old_pos = self.pos
-                arg = self._parse_expression()
+        # Если после print сразу NEWLINE/EOF/DEDENT, то просто print()
+        if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+            return print_node
+        
+        # Разбираем список аргументов, разделённых запятыми
+        while True:
+            # Если токен - это что-то, что не может быть началом выражения
+            # (например, NEWLINE, EOF, DEDENT, ключевое слово), выходим
+            if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                break
+            
+            # Пытаемся разобрать выражение
+            arg = self.parse_expression()
+            if arg:
+                print_node.args.append(arg)
+            else:
+                # Если не удалось разобрать, значит синтаксическая ошибка
+                token = self.current_token()
+                self.errors.append(
+                    f"Строка {token.line}:{token.column}: "
+                    f"Ожидается выражение в print, но получен токен {token.type.name}"
+                )
+                break
+            
+            # Смотрим, что после выражения
+            if self.current_token().type == TokenType.COMMA:
+                self.advance()  # consume comma
                 
-                if arg is not None:  # Эвличная проверка на None
-                    print_node.args.append(arg)
-                
-                # Защита от зацыкливания
-                if self.pos == old_pos:
+                # Проверяем, не идёт ли после запятой конец инструкции
+                # (это означает trailing comma)
+                if self.current_token().type in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                    print_node.newline = False  # trailing comma = no newline
                     break
-                
-                if self.current_token().type == TokenType.COMMA:
-                    self.advance()
-                    # Проверка на запятую в конце (без \n)
-                    if self.current_token().type == TokenType.NEWLINE:
-                        print_node.newline = False
-                        break
-                else:
-                    break
+                # Иначе ожидается ещё одно выражение (цикл продолжится)
+            else:
+                # Нет запятой - это конец списка аргументов
+                # Проверяем, не стоит ли здесь неожиданный токен
+                # (это ошибка вроде 'print value1 value2' без запятой)
+                if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF, TokenType.DEDENT):
+                    token = self.current_token()
+                    self.errors.append(
+                        f"Строка {token.line}:{token.column}: "
+                        f"Ожидается запятая или конец инструкции, но получен токен {token.type.name}. "
+                        f"Возможно, в print забыли запятую между аргументами."
+                    )
+                break
         
         return print_node
     
-    def _parse_return(self) -> Return:
+    def parse_return(self) -> Return:
         """Разбор оператора return"""
         return_token = self.advance()  # return
         return_node = Return(line=return_token.line, column=return_token.column)
         
-        # Значение (опционально)
         if self.current_token().type not in (TokenType.NEWLINE, TokenType.EOF):
-            return_node.value = self._parse_expression()
+            return_node.value = self.parse_expression()
         
         return return_node
     
-    def _parse_import(self) -> Import:
+    def parse_import(self) -> Import:
         """Разбор import"""
         import_token = self.advance()  # import
         import_node = Import(line=import_token.line, column=import_token.column)
         
-        # Модули
         while True:
             module_token = self.expect(TokenType.IDENTIFIER)
             if module_token:
@@ -376,19 +348,17 @@ class Parser:
         
         return import_node
     
-    def _parse_from_import(self) -> ImportFrom:
+    def parse_from_import(self) -> ImportFrom:
         """Разбор from ... import ..."""
         from_token = self.advance()  # from
         import_from = ImportFrom(line=from_token.line, column=from_token.column)
         
-        # Модуль
         module_token = self.expect(TokenType.IDENTIFIER)
         if module_token:
             import_from.module = module_token.value
         
         self.expect(TokenType.IMPORT)
         
-        # Имена
         while True:
             name_token = self.expect(TokenType.IDENTIFIER)
             if name_token:
@@ -401,78 +371,75 @@ class Parser:
         
         return import_from
     
-    def _parse_expression_statement(self) -> Optional[ASTNode]:
+    def parse_expression_statement(self) -> Optional[ASTNode]:
         """Разбор выражения или присваивания"""
-        expr = self._parse_expression()
+        expr = self.parse_expression()
         
-        if expr is None:  # Эвличная проверка на None
+        if not expr:
             return None
         
-        # Проверка на присваивание
         if self.current_token().type == TokenType.ASSIGN:
             self.advance()
-            value = self._parse_expression()
-            if value is not None:  # Эвличная проверка на None
+            value = self.parse_expression()
+            if value:
                 return Assign(target=expr, value=value, 
                              line=self.current_token().line, 
                              column=self.current_token().column)
-            # Если значение не разобрано, возвращаем выражение
-            return expr
         
         return expr
     
-    def _parse_expression(self) -> Optional[ASTNode]:
-        """Разбор выражения (точка входа)"""
-        return self._parse_or_expr()
+    def parse_expression(self) -> Optional[ASTNode]:
+        """Разбор выражения"""
+        return self.parse_or_expr()
     
-    def _parse_or_expr(self) -> Optional[ASTNode]:
+    def parse_or_expr(self) -> Optional[ASTNode]:
         """Логическое OR"""
-        left = self._parse_and_expr()
+        left = self.parse_and_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         while self.current_token().type == TokenType.OR:
             op_token = self.advance()
-            right = self._parse_and_expr()
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_and_expr()
+            if right:
                 left = BinOp(left=left, op='or', right=right, 
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_and_expr(self) -> Optional[ASTNode]:
+    def parse_and_expr(self) -> Optional[ASTNode]:
         """Логическое AND"""
-        left = self._parse_not_expr()
+        left = self.parse_not_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         while self.current_token().type == TokenType.AND:
             op_token = self.advance()
-            right = self._parse_not_expr()
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_not_expr()
+            if right:
                 left = BinOp(left=left, op='and', right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_not_expr(self) -> Optional[ASTNode]:
+    def parse_not_expr(self) -> Optional[ASTNode]:
         """Логическое NOT"""
         if self.current_token().type == TokenType.NOT:
             op_token = self.advance()
-            operand = self._parse_not_expr()
-            if operand is not None:  # Эвличная проверка на None
+            operand = self.parse_not_expr()
+            if operand:
                 return UnaryOp(op='not', operand=operand,
                               line=op_token.line, column=op_token.column)
         
-        return self._parse_comparison()
+        return self.parse_comparison()
     
-    def _parse_comparison(self) -> Optional[ASTNode]:
+    def parse_comparison(self) -> Optional[ASTNode]:
         """Сравнения"""
-        left = self._parse_add_expr()
+        left = self.parse_add_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         comp_ops = {TokenType.EQ, TokenType.NE, TokenType.LT, 
@@ -481,34 +448,34 @@ class Parser:
         
         while self.current_token().type in comp_ops:
             op_token = self.advance()
-            right = self._parse_add_expr()
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_add_expr()
+            if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_add_expr(self) -> Optional[ASTNode]:
+    def parse_add_expr(self) -> Optional[ASTNode]:
         """Сложение и вычитание"""
-        left = self._parse_mult_expr()
+        left = self.parse_mult_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         while self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
-            right = self._parse_mult_expr()
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_mult_expr()
+            if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_mult_expr(self) -> Optional[ASTNode]:
+    def parse_mult_expr(self) -> Optional[ASTNode]:
         """Умножение, деление, остаток"""
-        left = self._parse_power_expr()
+        left = self.parse_power_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         ops = {TokenType.MULTIPLY, TokenType.DIVIDE, 
@@ -516,114 +483,227 @@ class Parser:
         
         while self.current_token().type in ops:
             op_token = self.advance()
-            right = self._parse_power_expr()
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_power_expr()
+            if right:
                 left = BinOp(left=left, op=op_token.value, right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_power_expr(self) -> Optional[ASTNode]:
+    def parse_power_expr(self) -> Optional[ASTNode]:
         """Возведение в степень"""
-        left = self._parse_unary_expr()
+        left = self.parse_unary_expr()
         
-        if left is None:  # Эвличная проверка на None
+        if not left:
             return None
         
         if self.current_token().type == TokenType.POWER:
             op_token = self.advance()
-            right = self._parse_power_expr()  # Правоассоциативно
-            if right is not None:  # Эвличная проверка на None
+            right = self.parse_power_expr()  # Правоассоциативно
+            if right:
                 return BinOp(left=left, op='**', right=right,
                             line=op_token.line, column=op_token.column)
         
         return left
     
-    def _parse_unary_expr(self) -> Optional[ASTNode]:
+    def parse_unary_expr(self) -> Optional[ASTNode]:
         """Унарные операторы"""
         if self.current_token().type in (TokenType.PLUS, TokenType.MINUS):
             op_token = self.advance()
-            operand = self._parse_unary_expr()
-            if operand is not None:  # Эвличная проверка на None
+            operand = self.parse_unary_expr()
+            if operand:
                 return UnaryOp(op=op_token.value, operand=operand,
                               line=op_token.line, column=op_token.column)
         
-        return self._parse_primary()
+        return self.parse_postfix()
     
-    def _parse_primary(self) -> Optional[ASTNode]:
+    def parse_postfix(self) -> Optional[ASTNode]:
+        """Постфиксные выражения (атрибуты, индексация, вызывы)"""
+        expr = self.parse_primary()
+        
+        if not expr:
+            return None
+        
+        while True:
+            if self.current_token().type == TokenType.DOT:
+                dot_token = self.current_token()
+                self.advance()
+                attr_token = self.expect(TokenType.IDENTIFIER)
+                if attr_token:
+                    expr = Attribute(value=expr, attr=attr_token.value,
+                                   line=dot_token.line, column=dot_token.column)
+                else:
+                    break
+            elif self.current_token().type == TokenType.LBRACKET:
+                bracket_token = self.current_token()
+                self.advance()
+                index = self.parse_expression()
+                self.expect(TokenType.RBRACKET)
+                if index:
+                    expr = Subscript(value=expr, slice=index,
+                                   line=bracket_token.line, column=bracket_token.column)
+                else:
+                    break
+            elif self.current_token().type == TokenType.LPAREN:
+                paren_token = self.current_token()
+                self.advance()
+                if isinstance(expr, Name):
+                    call = Call(func=expr, line=paren_token.line, column=paren_token.column)
+                    
+                    if self.current_token().type != TokenType.RPAREN:
+                        while True:
+                            old_pos = self.pos
+                            arg = self.parse_expression()
+                            
+                            if arg:
+                                call.args.append(arg)
+                            
+                            if self.pos == old_pos:
+                                break
+                            
+                            if self.current_token().type == TokenType.COMMA:
+                                self.advance()
+                            else:
+                                break
+                    
+                    self.expect(TokenType.RPAREN)
+                    expr = call
+                elif isinstance(expr, Attribute):
+                    call = Call(func=expr, line=paren_token.line, column=paren_token.column)
+                    
+                    if self.current_token().type != TokenType.RPAREN:
+                        while True:
+                            old_pos = self.pos
+                            arg = self.parse_expression()
+                            
+                            if arg:
+                                call.args.append(arg)
+                            
+                            if self.pos == old_pos:
+                                break
+                            
+                            if self.current_token().type == TokenType.COMMA:
+                                self.advance()
+                            else:
+                                break
+                    
+                    self.expect(TokenType.RPAREN)
+                    expr = call
+                else:
+                    break
+            else:
+                break
+        
+        return expr
+    
+    def parse_primary(self) -> Optional[ASTNode]:
         """Первичные выражения"""
         token = self.current_token()
         
-        # Идентификатор или вызов функции
+        # Идентификатор
         if token.type == TokenType.IDENTIFIER:
             self.advance()
-            name = Name(id=token.value, line=token.line, column=token.column)
-            
-            # Вызов функции
-            if self.current_token().type == TokenType.LPAREN:
-                self.advance()  # (
-                call = Call(func=name, line=token.line, column=token.column)
-                
-                if self.current_token().type != TokenType.RPAREN:
-                    while True:
-                        old_pos = self.pos
-                        arg = self._parse_expression()
-                        
-                        if arg is not None:  # Эвличная проверка на None
-                            call.args.append(arg)
-                        
-                        # Защита от зацыкливания
-                        if self.pos == old_pos:
-                            break
-                        
-                        if self.current_token().type == TokenType.COMMA:
-                            self.advance()
-                        else:
-                            break
-                
-                self.expect(TokenType.RPAREN)
-                return call
-            
-            return name
+            return Name(id=token.value, line=token.line, column=token.column)
         
-        # Числа
+        # Число
         if token.type == TokenType.NUMBER:
             self.advance()
             return Literal(value=token.value, line=token.line, column=token.column)
         
-        # Строки
+        # Строка
         if token.type == TokenType.STRING:
             self.advance()
             return Literal(value=token.value, line=token.line, column=token.column)
         
-        # Логические константы
+        # Логические значения
         if token.type in (TokenType.TRUE, TokenType.FALSE, TokenType.NONE):
             self.advance()
-            # Преобразуем значение
             if token.type == TokenType.TRUE:
-                value = True
+                return Literal(value=True, line=token.line, column=token.column)
             elif token.type == TokenType.FALSE:
-                value = False
+                return Literal(value=False, line=token.line, column=token.column)
             else:  # NONE
-                value = None
-            return Literal(value=value, line=token.line, column=token.column)
+                return Literal(value=None, line=token.line, column=token.column)
         
-        # Скобки
-        if token.type == TokenType.LPAREN:
+        # Список [1, 2, 3]
+        if token.type == TokenType.LBRACKET:
+            bracket_token = token
             self.advance()
-            expr = self._parse_expression()
-            self.expect(TokenType.RPAREN)
-            return expr
+            elements = []
+            
+            while self.current_token().type != TokenType.RBRACKET:
+                elem = self.parse_expression()
+                if elem:
+                    elements.append(elem)
+                
+                if self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                else:
+                    break
+            
+            self.expect(TokenType.RBRACKET)
+            return Literal(value=('list', elements), line=bracket_token.line, column=bracket_token.column)
+        
+        # Словарь {"a": 1}
+        if token.type == TokenType.LBRACE:
+            brace_token = token
+            self.advance()
+            pairs = []
+            
+            while self.current_token().type != TokenType.RBRACE:
+                key = self.parse_expression()
+                if key:
+                    self.expect(TokenType.COLON)
+                    value = self.parse_expression()
+                    if value:
+                        pairs.append((key, value))
+                
+                if self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                else:
+                    break
+            
+            self.expect(TokenType.RBRACE)
+            return Literal(value=('dict', pairs), line=brace_token.line, column=brace_token.column)
+        
+        # Кортеж (1, 2, 3) или (а) и скобки
+        if token.type == TokenType.LPAREN:
+            paren_token = token
+            self.advance()
+            
+            # Пустые скобки
+            if self.current_token().type == TokenType.RPAREN:
+                self.advance()
+                return Literal(value=('tuple', []), line=paren_token.line, column=paren_token.column)
+            
+            expr = self.parse_expression()
+            
+            # Кортеж со скобками
+            if self.current_token().type == TokenType.COMMA:
+                elements = [expr] if expr else []
+                while self.current_token().type == TokenType.COMMA:
+                    self.advance()
+                    if self.current_token().type == TokenType.RPAREN:
+                        break
+                    elem = self.parse_expression()
+                    if elem:
+                        elements.append(elem)
+                
+                self.expect(TokenType.RPAREN)
+                return Literal(value=('tuple', elements), line=paren_token.line, column=paren_token.column)
+            else:
+                # Простые скобки
+                self.expect(TokenType.RPAREN)
+                return expr
         
         self.errors.append(
             f"Строка {token.line}:{token.column}: "
-            f"Неожиданный токен {token.type.name} (value={repr(token.value)})"
+            f"Неожиданный токен {token.type.name}"
         )
-        # Принудительное продвижение для предотвращения зацыкливания
         self.advance()
         return None
     
-    def _parse_block(self) -> list[ASTNode]:
+    def parse_block(self) -> List[ASTNode]:
         """Разбор блока кода"""
         statements = []
         
@@ -633,20 +713,17 @@ class Parser:
             if self.current_token().type in (TokenType.DEDENT, TokenType.EOF):
                 break
             
-            # Сохраняем позицию для защиты от зацыкливания
             old_pos = self.pos
-            
-            stmt = self._parse_statement()
-            if stmt is not None:  # Эвличная проверка на None
+            stmt = self.parse_statement()
+            if stmt:
                 statements.append(stmt)
             
-            # КРИТИЧЕСКО ВАЖНО: если позиция не изменилась, принудительно продвигаемся
             if self.pos == old_pos:
                 token = self.current_token()
                 self.errors.append(
                     f"Строка {token.line}:{token.column}: "
-                    f"Не удалось разобрать токен {token.type.name} (value={repr(token.value)}). "
-                    f"Пропускаем для предотвращения зацыкливания."
+                    f"Не удалось разобрать токен {token.type.name}. "
+                    f"Пропускаем для предотвращения зацикливания."
                 )
                 self.advance()
         
