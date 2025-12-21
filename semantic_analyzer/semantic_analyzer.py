@@ -203,9 +203,10 @@ class SemanticAnalyzer:
         elif isinstance(node, Subscript):
             self._analyze_subscript(node)
         
-        elif isinstance(node, (Print, Import, ImportFrom, Pass)):
-            # Эти не нуждаются в семантическом анализе
-            pass
+        elif isinstance(node, (Print, Import, ImportFrom, Pass, Literal, UnaryOp)):
+            # Эти нуждаются в анализе подузлов если есть
+            if hasattr(node, 'value') and isinstance(node.value, ASTNode):
+                self._analyze_node(node.value)
     
     def _analyze_function_def(self, node: FunctionDef):
         """Анализ определения функции"""
@@ -223,6 +224,7 @@ class SemanticAnalyzer:
         
         # Объявляю функцию в текущем скопе
         self.current_scope.functions[node.name] = node
+        self.current_scope.declare(node.name)
         
         # Создаю новый скоп для функции
         func_scope = Scope(f"function_{node.name}", self.current_scope, 'function')
@@ -357,6 +359,9 @@ class SemanticAnalyzer:
     
     def _analyze_assign(self, node: Assign):
         """Анализ ассайнмент стейтмента"""
+        # Анализирую значение первым
+        self._analyze_node(node.value)
+        
         # Проверяю наличие идентификатора
         if isinstance(node.target, Name):
             name = node.target.id
@@ -372,12 +377,19 @@ class SemanticAnalyzer:
             
             # Объявляю или обновляю переменную
             self.current_scope.declare(name)
-        
-        # Анализирую значение
-        self._analyze_node(node.value)
+        elif isinstance(node.target, Attribute):
+            # Ассайнмент атрибуту (например: obj.attr = value)
+            self._analyze_node(node.target)
+        elif isinstance(node.target, Subscript):
+            # Ассайнмент к индексу (например: list[0] = value)
+            self._analyze_node(node.target)
     
     def _analyze_call(self, node: Call):
         """Анализ вызова функции"""
+        # Анализирую аргументы
+        for arg in node.args:
+            self._analyze_node(arg)
+        
         # Проверяю наличие функции
         if isinstance(node.func, Name):
             func_name = node.func.id
@@ -392,7 +404,7 @@ class SemanticAnalyzer:
                         if len(node.args) != arg_spec:
                             self.errors.append(SemanticError(
                                 ErrorType.ARGUMENT_COUNT_MISMATCH,
-                                f"Функция '{func_name}' ожидает {arg_spec} аргумент(ов), получено {len(node.args)}",
+                                f"[ARGUMENT_COUNT_MISMATCH] Функция '{func_name}' ожидает {arg_spec} аргумент(ов), получено {len(node.args)}",
                                 node.line,
                                 node.column
                             ))
@@ -402,14 +414,14 @@ class SemanticAnalyzer:
                         if len(node.args) < min_args:
                             self.errors.append(SemanticError(
                                 ErrorType.ARGUMENT_COUNT_MISMATCH,
-                                f"Функция '{func_name}' ожидает как минимум {min_args} аргумент(ов), получено {len(node.args)}",
+                                f"[ARGUMENT_COUNT_MISMATCH] Функция '{func_name}' ожидает как минимум {min_args} аргумент(ов), получено {len(node.args)}",
                                 node.line,
                                 node.column
                             ))
                         elif max_args is not None and len(node.args) > max_args:
                             self.errors.append(SemanticError(
                                 ErrorType.ARGUMENT_COUNT_MISMATCH,
-                                f"Функция '{func_name}' ожидает максимум {max_args} аргумент(ов), получено {len(node.args)}",
+                                f"[ARGUMENT_COUNT_MISMATCH] Функция '{func_name}' ожидает максимум {max_args} аргумент(ов), получено {len(node.args)}",
                                 node.line,
                                 node.column
                             ))
@@ -421,7 +433,7 @@ class SemanticAnalyzer:
                     if not self.current_scope.is_declared(func_name):
                         self.errors.append(SemanticError(
                             ErrorType.UNDECLARED_IDENTIFIER,
-                            f"Функция '{func_name}' не определена",
+                            f"[UNDECLARED_IDENTIFIER] Функция '{func_name}' не определена",
                             node.line,
                             node.column
                         ))
@@ -431,21 +443,20 @@ class SemanticAnalyzer:
                     if len(node.args) != len(func_def.params):
                         self.errors.append(SemanticError(
                             ErrorType.ARGUMENT_COUNT_MISMATCH,
-                            f"Функция '{func_name}' ожидает {len(func_def.params)} аргумент(ов), получено {len(node.args)}",
+                            f"[ARGUMENT_COUNT_MISMATCH] Функция '{func_name}' ожидает {len(func_def.params)} аргумент(ов), получено {len(node.args)}",
                             node.line,
                             node.column
                         ))
         elif isinstance(node.func, Attribute):
             # Вызов метода
             self._analyze_method_call(node)
-        
-        # Анализирую аргументы
-        for arg in node.args:
-            self._analyze_node(arg)
     
     def _analyze_method_call(self, node: Call):
         """Анализ вызова метода"""
         if isinstance(node.func, Attribute):
+            # Анализирую объект
+            self._analyze_node(node.func.value)
+            
             obj_name = None
             class_name = None
             method_name = node.func.attr
@@ -457,22 +468,27 @@ class SemanticAnalyzer:
                 class_def = self.current_scope.get_class(obj_name)
                 if class_def:
                     class_name = obj_name
-                else:
-                    # Предполагаю, что это экземпляр какого-то класса
-                    # Но мы не можем точно определить тип без анализа типов
-                    pass
             
             # Если знаю класс, проверяю метод
             if class_name:
                 class_methods = self.current_scope.get_class_methods(class_name)
-                if class_methods and method_name in class_methods:
-                    method_def = class_methods[method_name]
-                    # Проверяю количество аргументов (учитываю self)
-                    expected_args = len(method_def.params) - 1  # Исключаю self
-                    if len(node.args) != expected_args:
+                if class_methods:
+                    if method_name in class_methods:
+                        method_def = class_methods[method_name]
+                        # Проверяю количество аргументов (учитываю self)
+                        expected_args = len(method_def.params) - 1  # Исключаю self
+                        if len(node.args) != expected_args:
+                            self.errors.append(SemanticError(
+                                ErrorType.ARGUMENT_COUNT_MISMATCH,
+                                f"[ARGUMENT_COUNT_MISMATCH] Метод '{method_name}' класса '{class_name}' ожидает {expected_args} аргумент(ов), получено {len(node.args)}",
+                                node.line,
+                                node.column
+                            ))
+                    else:
+                        # Метод не найден в классе
                         self.errors.append(SemanticError(
-                            ErrorType.ARGUMENT_COUNT_MISMATCH,
-                            f"Метод '{method_name}' класса '{class_name}' ожидает {expected_args} аргумент(ов), получено {len(node.args)}",
+                            ErrorType.UNDECLARED_IDENTIFIER,
+                            f"[UNDECLARED_IDENTIFIER] Метод '{method_name}' не найден в классе '{class_name}'",
                             node.line,
                             node.column
                         ))
@@ -484,13 +500,13 @@ class SemanticAnalyzer:
             if node.id not in BUILTIN_FUNCTIONS and node.id not in BUILTIN_TYPES:
                 self.errors.append(SemanticError(
                     ErrorType.UNDECLARED_IDENTIFIER,
-                    f"Переменная '{node.id}' не определена",
+                    f"[UNDECLARED_IDENTIFIER] Переменная '{node.id}' не определена",
                     node.line,
                     node.column
                 ))
     
     def _analyze_attribute(self, node: Attribute):
-        """Анализ атрибута объекта"""
+        """Анализ атрибута объекта с проверкой на несуществующие атрибуты"""
         # Анализирую объект
         self._analyze_node(node.value)
         
@@ -508,8 +524,13 @@ class SemanticAnalyzer:
                 
                 if (not (class_methods and attr_name in class_methods) and 
                     not (class_attrs and attr_name in class_attrs)):
-                    # Атрибут не найден
-                    pass  # Допускаю динамические атрибуты в Python
+                    # Атрибут не найден - это ошибка!
+                    self.errors.append(SemanticError(
+                        ErrorType.UNDECLARED_IDENTIFIER,
+                        f"[UNDECLARED_IDENTIFIER] Атрибут '{attr_name}' не найден в классе '{obj_name}'",
+                        node.line,
+                        node.column
+                    ))
     
     def _analyze_subscript(self, node: Subscript):
         """Анализ индексирования"""
@@ -528,7 +549,7 @@ class SemanticAnalyzer:
             if isinstance(node.right, Literal) and node.right.value == 0:
                 self.errors.append(SemanticError(
                     ErrorType.CONST_DIVISION_BY_ZERO,
-                    "Деление на ноль (константа)",
+                    "[CONST_DIVISION_BY_ZERO] Деление на ноль (константа)",
                     node.line,
                     node.column
                 ))
