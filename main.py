@@ -424,7 +424,6 @@ class TranslatorGUI:
     
     def _setup_shortcuts(self):
         """Горячие клавиши для полей ввода/вывода"""
-        # Стандартные Ctrl+A/C/V работают в современных Tkinter, но явно их продублируем
         for widget in (self.input_text, self.output_text, self.console_text, self.tree_text):
             widget.bind('<Control-a>', self._select_all)
             widget.bind('<Control-A>', self._select_all)
@@ -465,9 +464,9 @@ class TranslatorGUI:
         if text.strip():
             self.root.clipboard_clear()
             self.root.clipboard_append(text)
-            self._log("Код скопирован в буфер обмена", 'success')
+            self._log("✔ Код скопирован в буфер обмена", 'success')
         else:
-            self._log("Нет кода для копирования", 'warning')
+            self._log("⚠ Нет кода для копирования", 'warning')
     
     def _load_first_example(self):
         """Загрузить первый пример"""
@@ -485,28 +484,22 @@ class TranslatorGUI:
     
     def _clear_views(self):
         """Очистить все поля вывода"""
-        # Очистка таблицы токенов
         for item in self.tokens_tree.get_children():
             self.tokens_tree.delete(item)
         
-        # Очистка таблицы идентификаторов
         for item in self.id_tree.get_children():
             self.id_tree.delete(item)
         
-        # Очистка консоли
         self.console_text.configure(state=tk.NORMAL)
         self.console_text.delete('1.0', tk.END)
         self.console_text.configure(state=tk.DISABLED)
         
-        # Очистка вывода
         self.output_text.configure(state=tk.NORMAL)
         self.output_text.delete('1.0', tk.END)
         self.output_text.configure(state=tk.DISABLED)
         
-        # Очистка текстового дерева
         self.tree_text.delete('1.0', tk.END)
         
-        # Очистка графического дерева
         if self.ast_visualizer:
             self.ast_visualizer.clear()
     
@@ -523,26 +516,21 @@ class TranslatorGUI:
     def _analyze_safe(self):
         """Безопасный вызов анализа с обработкой исключений"""
         try:
-            # Начинаем новую сессию логирования
             log_file = self.logger.start_new_session()
             self.logger.info(f"Python версия: {sys.version}")
             self.logger.info(f"Tkinter версия: {tk.TkVersion}")
             
-            # Выполняем анализ
             self._analyze()
             
-            # Закрываем лог
             self.logger.close()
             
         except Exception as e:
-            # Логируем критическую ошибку
             self.logger.critical(f"КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
             self.logger.exception("Traceback:")
             self.logger.close()
             
-            # Показываем пользователю
             error_msg = f"Произошла критическая ошибка:\n{str(e)}\n\nЛог сохранен в: {self.logger.current_log_file}"
-            self._log(f"\nↈ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", 'error')
+            self._log(f"\n✘ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", 'error')
             messagebox.showerror("Ошибка", error_msg)
     
     def _analyze(self):
@@ -555,7 +543,7 @@ class TranslatorGUI:
         self.logger.debug(f"Первые 100 символов: {source[:100]}")
         
         self._log("=" * 60)
-        self._log("НАЧАЛО АНАЛИЗА", 'success')
+        self._log("✔ НАЧАЛО АНАЛИЗА", 'success')
         self._log("=" * 60)
         
         # 1. Лексический анализ
@@ -579,15 +567,14 @@ class TranslatorGUI:
                 for i, error in enumerate(self.lexer.errors, 1):
                     self.logger.error(f"  Ошибка {i}: {error}")
                 
-                self._log("\nↈ Обнаружены лексические ошибки:", 'error')
+                self._log("\n✘ Обнаружены лексические ошибки:", 'error')
                 for error in self.lexer.errors:
-                    self._log(f"  • {error}", 'error')
+                    self._log(f"  {error}", 'error')
                 return
             
             self.logger.info("Лексический анализ завершен успешно")
             self._log(f"✔ Найдено {len(tokens)} токенов", 'success')
             
-            # Заполнение таблицы токенов
             self.logger.info("Заполнение таблицы токенов...")
             self._fill_tokens_table(tokens)
             self.logger.info("Таблица токенов заполнена")
@@ -618,20 +605,18 @@ class TranslatorGUI:
                 for i, error in enumerate(self.parser.errors, 1):
                     self.logger.error(f"  Ошибка {i}: {error}")
                 
-                self._log("\nↈ Обнаружены синтаксические ошибки:", 'error')
+                self._log("\n✘ Обнаружены синтаксические ошибки:", 'error')
                 for error in self.parser.errors:
-                    self._log(f"  • {error}", 'error')
+                    self._log(f"  {error}", 'error')
                 return
             
             self.logger.info("Синтаксический анализ завершен успешно")
             self._log("✔ Синтаксическое дерево построено", 'success')
             
-            # Преобразование AST в структурированное дерево
             self.logger.info("Преобразование AST в структурированное дерево...")
             tree_node = self.tree_visitor.visit(self.ast)
             self.logger.info("Дерево преобразовано успешно")
             
-            # Отображение дерева
             self.logger.info("Отображение текстового дерева...")
             self._display_tree_text(tree_node)
             self.logger.info("Текстовое дерево отображено")
@@ -658,9 +643,9 @@ class TranslatorGUI:
                 for i, error in enumerate(semantic_errors, 1):
                     self.logger.error(f"  Ошибка {i}: {error}")
                 
-                self._log(f"\nↈ Обнаружены семантические ошибки ({len(semantic_errors)}):", 'error')
+                self._log(f"\n✘ Обнаружены семантические ошибки ({len(semantic_errors)}):", 'error')
                 for error in semantic_errors:
-                    self._log(f"  • {error}", 'error')
+                    self._log(f"  {error}", 'error')
                 return
             
             self.logger.info("Семантический анализ пройден успешно")
@@ -694,7 +679,6 @@ class TranslatorGUI:
             self.logger.info(f"Генерация завершена. Длина кода: {len(python3_code)} символов")
             self.logger.debug(f"Первые 100 символов: {python3_code[:100]}")
             
-            # Вывод результата
             self.logger.info("Вывод результата в GUI...")
             self.output_text.configure(state=tk.NORMAL)
             self.output_text.insert('1.0', python3_code)
@@ -712,7 +696,7 @@ class TranslatorGUI:
         self.logger.info("Все этапы завершены успешно")
         
         self._log("\n" + "=" * 60)
-        self._log("АНАЛИЗ ЗАВЕРШЕН УСПЕШНО!", 'success')
+        self._log("✔ АНАЛИЗ ЗАВЕРШЕН УСПЕШНО!", 'success')
         self._log("=" * 60)
     
     def _fill_tokens_table(self, tokens: List[Token]):
@@ -744,7 +728,6 @@ class TranslatorGUI:
         if not self.id_table:
             return
         
-        # Настройка цветов для scope
         self._configure_scope_tags()
         
         for entry in self.id_table.get_all_entries():
@@ -775,19 +758,17 @@ class TranslatorGUI:
         return self.scope_colors[hash_val % len(self.scope_colors)]
     
     def _display_tree_text(self, tree_node: TreeNode, level: int = 0):
-        """Отобразить дерево в текстовом виде (как в labSYN.py)"""
+        """Отобразить дерево в текстовом виде"""
         if not tree_node:
             return
         
         indent = "  " * level
         
-        # Выводим узел
         if tree_node.value:
             self.tree_text.insert(tk.END, f"{indent}{tree_node.name} '{tree_node.value}'\n")
         else:
             self.tree_text.insert(tk.END, f"{indent}{tree_node.name}\n")
         
-        # Рекурсивно выводим детей
         for child in tree_node.children:
             self._display_tree_text(child, level + 1)
     
