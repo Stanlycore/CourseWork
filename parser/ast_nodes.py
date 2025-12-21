@@ -119,6 +119,24 @@ class Return(ASTNode):
 
 
 @dataclass
+class Break(ASTNode):
+    """Оператор break"""
+    pass
+
+
+@dataclass
+class Continue(ASTNode):
+    """Оператор continue"""
+    pass
+
+
+@dataclass
+class Pass(ASTNode):
+    """Оператор pass"""
+    pass
+
+
+@dataclass
 class Name(ASTNode):
     """Идентификатор"""
     id: str = ""
