@@ -548,7 +548,7 @@ class TranslatorGUI:
         
         # 1. Лексический анализ
         self.logger.section("ЭТАП 1: ЛЕКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[1/6] Лексический анализ...")
+        self._log("\n[1/5] Лексический анализ...")
         
         try:
             self.logger.info("Создание лексера...")
@@ -589,7 +589,7 @@ class TranslatorGUI:
         
         # 2. Синтаксический анализ
         self.logger.section("ЭТАП 2: СИНТАКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[2/6] Синтаксический анализ...")
+        self._log("\n[2/5] Синтаксический анализ...")
         
         try:
             self.logger.info("Создание парсера...")
@@ -631,7 +631,7 @@ class TranslatorGUI:
         
         # 3. Семантический анализ
         self.logger.section("ЭТАП 3: СЕМАНТИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[3/6] Семантический анализ...")
+        self._log("\n[3/5] Семантический анализ...")
         
         try:
             self.logger.info("Запуск семантического анализатора...")
@@ -657,7 +657,7 @@ class TranslatorGUI:
         
         # 4. Оптимизация
         self.logger.section("ЭТАП 4: ОПТИМИЗАЦИЯ")
-        self._log("\n[4/6] Оптимизация...")
+        self._log("\n[4/5] Оптимизация...")
         
         try:
             self.logger.info("Запуск оптимизатора...")
@@ -671,7 +671,7 @@ class TranslatorGUI:
         
         # 5. Генерация кода
         self.logger.section("ЭТАП 5: ГЕНЕРАЦИЯ КОДА")
-        self._log("\n[5/6] Генерация Python 3 кода...")
+        self._log("\n[5/5] Генерация Python 3 кода...")
         
         try:
             self.logger.info("Запуск генератора кода...")
