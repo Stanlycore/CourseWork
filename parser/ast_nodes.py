@@ -16,7 +16,7 @@ class ASTNode:
     column: int = 0
     
     def ast_to_string(self, indent: int = 0) -> str:
-        """Преформатированый вывод узла (оверрайд в нижних классах)"""
+        """Преформатируемый вывод узла (оверрайд в нижних классах)"""
         return " " * (indent * 2) + self.__class__.__name__
 
 
@@ -232,6 +232,30 @@ class Return(ASTNode):
             result.append(f"{' ' * ((indent + 1) * 2)}value:")
             result.append(self.value.ast_to_string(indent + 2))
         return "\n".join(result)
+
+
+@dataclass
+class Break(ASTNode):
+    """Оператор break"""
+    
+    def ast_to_string(self, indent: int = 0) -> str:
+        return f"{' ' * (indent * 2)}Break"
+
+
+@dataclass
+class Continue(ASTNode):
+    """Оператор continue"""
+    
+    def ast_to_string(self, indent: int = 0) -> str:
+        return f"{' ' * (indent * 2)}Continue"
+
+
+@dataclass
+class Pass(ASTNode):
+    """Оператор pass"""
+    
+    def ast_to_string(self, indent: int = 0) -> str:
+        return f"{' ' * (indent * 2)}Pass"
 
 
 @dataclass
