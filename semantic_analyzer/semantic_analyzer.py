@@ -5,7 +5,11 @@
 """
 
 from typing import List, Set, Optional, Dict, Tuple
-from parser.ast_nodes import *
+from parser.ast_nodes import (
+    ASTNode, Program, FunctionDef, ClassDef, If, While, For,
+    Return, Break, Continue, Assign, Call, Name, BinOp, Literal,
+    Print, Import, ImportFrom, Pass, UnaryOp
+)
 from .errors import SemanticError, SemanticWarning, ErrorType
 
 
