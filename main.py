@@ -12,10 +12,9 @@ import traceback
 import sys
 
 from lexer import Lexer, Token, TokenType
-from parser import Parser
+from parser import Parser, ASTToTreeVisitor, TreeNode
 from parser.ast_nodes import ASTNode, Program
 from identifier_table import IdentifierTable
-from semantic_analyzer import SemanticAnalyzer
 from optimizer import Optimizer
 from code_generator import CodeGenerator
 from examples.examples import EXAMPLES
@@ -27,38 +26,42 @@ class ASTVisualizer:
     
     def __init__(self, canvas: tk.Canvas):
         self.canvas = canvas
-        self.node_width = 120
-        self.node_height = 40
-        self.level_height = 80
-        self.horizontal_spacing = 20
+        self.node_width = 140
+        self.node_height = 50
+        self.level_height = 100
+        self.horizontal_spacing = 30
         self.node_positions = {}  # {node_id: (x, y)}
         self.next_x = 50  # Следующая X координата
+        self.tree_root: Optional[TreeNode] = None
         
     def clear(self):
         """Очистить canvas"""
         self.canvas.delete('all')
         self.node_positions = {}
         self.next_x = 50
+        self.tree_root = None
     
-    def draw_tree(self, root: ASTNode):
-        """Нарисовать дерево"""
+    def draw_tree(self, tree_node: TreeNode):
+        """Нарисовать дерево на основе TreeNode"""
         self.clear()
-        if not root:
+        if not tree_node:
             return
         
+        self.tree_root = tree_node
+        
         # Рассчитываем позиции узлов
-        self._calculate_positions(root, 0)
+        self._calculate_positions(tree_node, 0)
         
         # Рисуем соединения
-        self._draw_connections(root)
+        self._draw_connections(tree_node)
         
         # Рисуем узлы
-        self._draw_nodes(root)
+        self._draw_nodes(tree_node)
         
         # Обновляем регион прокрутки
         self.canvas.configure(scrollregion=self.canvas.bbox('all'))
     
-    def _calculate_positions(self, node: ASTNode, level: int) -> Tuple[int, int]:
+    def _calculate_positions(self, node: TreeNode, level: int) -> Tuple[int, int]:
         """Рассчитать позиции узлов"""
         if not node:
             return (0, 0)
@@ -66,8 +69,7 @@ class ASTVisualizer:
         node_id = id(node)
         y = 50 + level * self.level_height
         
-        # Получаем детей
-        children = self._get_children(node)
+        children = node.children
         
         if not children:
             # Листовой узел
@@ -84,7 +86,7 @@ class ASTVisualizer:
                 child_positions.append(pos)
         
         if child_positions:
-            # Позиция продителя - центр между детьми
+            # Позиция родителя - центр между детьми
             min_x = min(pos[0] for pos in child_positions)
             max_x = max(pos[0] for pos in child_positions)
             x = (min_x + max_x) // 2
@@ -95,56 +97,7 @@ class ASTVisualizer:
         self.node_positions[node_id] = (x, y)
         return (x, y)
     
-    def _get_children(self, node: ASTNode) -> List[ASTNode]:
-        """Получить список дочерних узлов"""
-        children = []
-        
-        if hasattr(node, 'body') and isinstance(node.body, list):
-            children.extend([c for c in node.body if c])
-        
-        if hasattr(node, 'condition') and node.condition:
-            children.append(node.condition)
-        
-        if hasattr(node, 'then_body') and node.then_body:
-            children.extend([c for c in node.then_body if c])
-        
-        if hasattr(node, 'elif_blocks') and node.elif_blocks:
-            for cond, body in node.elif_blocks:
-                if cond:
-                    children.append(cond)
-                if body:
-                    children.extend([c for c in body if c])
-        
-        if hasattr(node, 'else_body') and node.else_body:
-            children.extend([c for c in node.else_body if c])
-        
-        if hasattr(node, 'left') and node.left:
-            children.append(node.left)
-        
-        if hasattr(node, 'right') and node.right:
-            children.append(node.right)
-        
-        if hasattr(node, 'operand') and node.operand:
-            children.append(node.operand)
-        
-        if hasattr(node, 'target') and node.target:
-            children.append(node.target)
-        
-        if hasattr(node, 'value') and isinstance(node.value, ASTNode):
-            children.append(node.value)
-        
-        if hasattr(node, 'iter') and isinstance(node.iter, ASTNode):
-            children.append(node.iter)
-        
-        if hasattr(node, 'args') and node.args:
-            children.extend([arg for arg in node.args if isinstance(arg, ASTNode)])
-        
-        if hasattr(node, 'func') and isinstance(node.func, ASTNode):
-            children.append(node.func)
-        
-        return children
-    
-    def _draw_connections(self, node: ASTNode):
+    def _draw_connections(self, node: TreeNode):
         """Нарисовать соединения между узлами"""
         if not node:
             return
@@ -155,13 +108,12 @@ class ASTVisualizer:
         
         x1, y1 = self.node_positions[node_id]
         
-        children = self._get_children(node)
-        for child in children:
+        for child in node.children:
             if child:
                 child_id = id(child)
                 if child_id in self.node_positions:
                     x2, y2 = self.node_positions[child_id]
-                    # Линия от центра продителя к центру ребенка
+                    # Линия от центра родителя к центру ребенка
                     self.canvas.create_line(
                         x1 + self.node_width // 2, y1 + self.node_height,
                         x2 + self.node_width // 2, y2,
@@ -169,7 +121,7 @@ class ASTVisualizer:
                     )
                     self._draw_connections(child)
     
-    def _draw_nodes(self, node: ASTNode):
+    def _draw_nodes(self, node: TreeNode):
         """Нарисовать узлы"""
         if not node:
             return
@@ -181,22 +133,11 @@ class ASTVisualizer:
         x, y = self.node_positions[node_id]
         
         # Определяем текст и цвет узла
-        node_type = type(node).__name__
-        node_text = node_type
-        node_color = self._get_node_color(node_type)
+        node_color = self._get_node_color(node.node_type)
         
-        # Добавляем дополнительную информацию
-        if hasattr(node, 'name') and node.name:
-            node_text = f"{node_type}\n{node.name}"
-        elif hasattr(node, 'id') and node.id:
-            node_text = f"{node_type}\n{node.id}"
-        elif hasattr(node, 'value') and node.value is not None and not isinstance(node.value, ASTNode):
-            val_str = str(node.value)[:15]
-            if len(str(node.value)) > 15:
-                val_str += '...'
-            node_text = f"{node_type}\n{val_str}"
-        elif hasattr(node, 'op') and node.op:
-            node_text = f"{node_type}\n{node.op}"
+        node_text = node.name
+        if node.value:
+            node_text = f"{node.name}\n{node.value}"
         
         # Рисуем прямоугольник
         rect = self.canvas.create_rectangle(
@@ -212,28 +153,19 @@ class ASTVisualizer:
         )
         
         # Рекурсивно рисуем детей
-        children = self._get_children(node)
-        for child in children:
+        for child in node.children:
             if child:
                 self._draw_nodes(child)
     
     def _get_node_color(self, node_type: str) -> str:
         """Получить цвет узла по типу"""
         color_map = {
-            'Program': '#E1F5FE',
-            'FunctionDef': '#B3E5FC',
-            'ClassDef': '#81D4FA',
-            'If': '#FFE082',
-            'While': '#FFD54F',
-            'For': '#FFCA28',
-            'Assign': '#C5E1A5',
-            'BinOp': '#AED581',
-            'UnaryOp': '#9CCC65',
-            'Call': '#F48FB1',
-            'Print': '#F06292',
-            'Return': '#EC407A',
-            'Name': '#CE93D8',
-            'Literal': '#BA68C8',
+            'keyword': '#FFE082',
+            'operator': '#FFB74D',
+            'operand': '#CE93D8',
+            'condition': '#B3E5FC',
+            'body': '#C5E1A5',
+            'default': '#E0E0E0',
         }
         return color_map.get(node_type, '#E0E0E0')
 
@@ -250,11 +182,11 @@ class TranslatorGUI:
         self.lexer: Optional[Lexer] = None
         self.parser: Optional[Parser] = None
         self.id_table: Optional[IdentifierTable] = None
-        self.semantic_analyzer = SemanticAnalyzer()
         self.optimizer = Optimizer()
         self.generator = CodeGenerator()
         self.ast: Optional[ASTNode] = None
         self.ast_visualizer: Optional[ASTVisualizer] = None
+        self.tree_visitor = ASTToTreeVisitor()
         
         # Логгер
         self.logger = TranslatorLogger()
@@ -268,6 +200,7 @@ class TranslatorGUI:
         
         self._setup_ui()
         self._setup_styles()
+        self._setup_shortcuts()
         self._load_first_example()
     
     def _setup_ui(self):
@@ -314,10 +247,10 @@ class TranslatorGUI:
         self.example_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.example_combo.bind('<<ComboboxSelected>>', self._on_example_selected)
         
-        # Поле ввода
+        # Поле ввода (укрупненный шрифт)
         self.input_text = scrolledtext.ScrolledText(
             left_frame, width=50, height=25, wrap=tk.WORD,
-            font=('Courier New', 11)
+            font=('Courier New', 14)
         )
         self.input_text.pack(fill=tk.BOTH, expand=True, pady=5)
         
@@ -338,9 +271,20 @@ class TranslatorGUI:
         
         self.output_text = scrolledtext.ScrolledText(
             output_frame, width=50, height=15, wrap=tk.WORD,
-            font=('Courier New', 11), state=tk.DISABLED
+            font=('Courier New', 14), state=tk.DISABLED
         )
         self.output_text.pack(fill=tk.BOTH, expand=True)
+        
+        # Панель кнопок под выводом
+        output_buttons = ttk.Frame(output_frame)
+        output_buttons.pack(fill=tk.X, pady=(5, 0))
+        
+        self.copy_output_btn = ttk.Button(
+            output_buttons,
+            text="Копировать в буфер обмена",
+            command=self._copy_output_to_clipboard
+        )
+        self.copy_output_btn.pack(side=tk.RIGHT)
         
         # Консоль ошибок
         console_frame = ttk.LabelFrame(right_paned, text="Консоль", padding=10)
@@ -348,7 +292,7 @@ class TranslatorGUI:
         
         self.console_text = scrolledtext.ScrolledText(
             console_frame, height=8, wrap=tk.WORD,
-            font=('Courier New', 10), state=tk.DISABLED
+            font=('Courier New', 12), state=tk.DISABLED
         )
         self.console_text.pack(fill=tk.BOTH, expand=True)
     
@@ -392,7 +336,7 @@ class TranslatorGUI:
         analysis_notebook.add(tree_text_frame, text="📄 Дерево (текст)")
         
         self.tree_text = scrolledtext.ScrolledText(
-            tree_text_frame, wrap=tk.WORD, font=('Courier New', 10)
+            tree_text_frame, wrap=tk.WORD, font=('Courier New', 12)
         )
         self.tree_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -462,7 +406,7 @@ class TranslatorGUI:
         except tk.TclError:
             pass
         
-        style.configure('Accent.TButton', font=('Arial', 11, 'bold'))
+        style.configure('Accent.TButton', font=('Arial', 12, 'bold'))
         
         # Цветовые теги для токенов
         self.tokens_tree.tag_configure('keyword', background='#E3F2FD')
@@ -472,12 +416,59 @@ class TranslatorGUI:
         self.tokens_tree.tag_configure('error', background='#FFEBEE')
         
         # Теги для консоли
-        self.console_text.tag_configure('error', foreground='#D32F2F', font=('Courier New', 10, 'bold'))
-        self.console_text.tag_configure('success', foreground='#388E3C', font=('Courier New', 10, 'bold'))
-        self.console_text.tag_configure('warning', foreground='#F57C00', font=('Courier New', 10, 'bold'))
+        self.console_text.tag_configure('error', foreground='#D32F2F', font=('Courier New', 12, 'bold'))
+        self.console_text.tag_configure('success', foreground='#388E3C', font=('Courier New', 12, 'bold'))
+        self.console_text.tag_configure('warning', foreground='#F57C00', font=('Courier New', 12, 'bold'))
+    
+    def _setup_shortcuts(self):
+        """Горячие клавиши для полей ввода/вывода"""
+        # Стандартные Ctrl+A/C/V работают в современных Tkinter, но явно их продублируем
+        for widget in (self.input_text, self.output_text, self.console_text, self.tree_text):
+            widget.bind('<Control-a>', self._select_all)
+            widget.bind('<Control-A>', self._select_all)
+            widget.bind('<Control-c>', self._copy)
+            widget.bind('<Control-C>', self._copy)
+            widget.bind('<Control-v>', self._paste)
+            widget.bind('<Control-V>', self._paste)
+    
+    def _select_all(self, event):
+        widget = event.widget
+        widget.tag_add('sel', '1.0', 'end-1c')
+        return 'break'
+    
+    def _copy(self, event):
+        widget = event.widget
+        try:
+            text = widget.get('sel.first', 'sel.last')
+        except tk.TclError:
+            return 'break'
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        return 'break'
+    
+    def _paste(self, event):
+        widget = event.widget
+        try:
+            text = self.root.clipboard_get()
+        except tk.TclError:
+            return 'break'
+        widget.insert('insert', text)
+        return 'break'
+    
+    def _copy_output_to_clipboard(self):
+        """Скопировать Python 3 код в буфер обмена"""
+        self.output_text.configure(state=tk.NORMAL)
+        text = self.output_text.get('1.0', 'end-1c')
+        self.output_text.configure(state=tk.DISABLED)
+        if text.strip():
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self._log("Код скопирован в буфер обмена", 'success')
+        else:
+            self._log("Нет кода для копирования", 'warning')
     
     def _load_first_example(self):
-        """Нагрузить первый пример"""
+        """Загрузить первый пример"""
         if EXAMPLES:
             first = list(EXAMPLES.keys())[0]
             self.example_var.set(first)
@@ -492,22 +483,28 @@ class TranslatorGUI:
     
     def _clear_views(self):
         """Очистить все поля вывода"""
+        # Очистка таблицы токенов
         for item in self.tokens_tree.get_children():
             self.tokens_tree.delete(item)
         
+        # Очистка таблицы идентификаторов
         for item in self.id_tree.get_children():
             self.id_tree.delete(item)
         
+        # Очистка консоли
         self.console_text.configure(state=tk.NORMAL)
         self.console_text.delete('1.0', tk.END)
         self.console_text.configure(state=tk.DISABLED)
         
+        # Очистка вывода
         self.output_text.configure(state=tk.NORMAL)
         self.output_text.delete('1.0', tk.END)
         self.output_text.configure(state=tk.DISABLED)
         
+        # Очистка текстового дерева
         self.tree_text.delete('1.0', tk.END)
         
+        # Очистка графического дерева
         if self.ast_visualizer:
             self.ast_visualizer.clear()
     
@@ -524,21 +521,26 @@ class TranslatorGUI:
     def _analyze_safe(self):
         """Безопасный вызов анализа с обработкой исключений"""
         try:
+            # Начинаем новую сессию логирования
             log_file = self.logger.start_new_session()
             self.logger.info(f"Python версия: {sys.version}")
             self.logger.info(f"Tkinter версия: {tk.TkVersion}")
             
+            # Выполняем анализ
             self._analyze()
             
+            # Закрываем лог
             self.logger.close()
             
         except Exception as e:
+            # Логируем критическую ошибку
             self.logger.critical(f"КРИТИЧЕСКАЯ ОШИБКА: {str(e)}")
             self.logger.exception("Traceback:")
             self.logger.close()
             
+            # Показываем пользователю
             error_msg = f"Произошла критическая ошибка:\n{str(e)}\n\nЛог сохранен в: {self.logger.current_log_file}"
-            self._log(f"\n✗ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", 'error')
+            self._log(f"\nↈ КРИТИЧЕСКАЯ ОШИБКА: {str(e)}", 'error')
             messagebox.showerror("Ошибка", error_msg)
     
     def _analyze(self):
@@ -548,6 +550,7 @@ class TranslatorGUI:
         
         source = self.input_text.get('1.0', tk.END)
         self.logger.info(f"Длина исходного кода: {len(source)} символов")
+        self.logger.debug(f"Первые 100 символов: {source[:100]}")
         
         self._log("=" * 60)
         self._log("НАЧАЛО АНАЛИЗА", 'success')
@@ -555,22 +558,41 @@ class TranslatorGUI:
         
         # 1. Лексический анализ
         self.logger.section("ЭТАП 1: ЛЕКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[1/6] Лексический анализ...")
+        self._log("\n[1/5] Лексический анализ...")
         
         try:
+            self.logger.info("Создание лексера...")
             self.lexer = Lexer(source)
+            self.logger.info("Лексер создан успешно")
+            
             self.id_table = self.lexer.identifier_table
+            self.logger.info("Таблица идентификаторов получена")
+            
+            self.logger.info("Запуск сканирования...")
             tokens = self.lexer.scan()
+            self.logger.info(f"Сканирование завершено. Найдено токенов: {len(tokens)}")
             
             if self.lexer.errors:
-                self._log("\n✗ Обнаружены лексические ошибки:", 'error')
+                self.logger.error(f"Обнаружено лексических ошибок: {len(self.lexer.errors)}")
+                for i, error in enumerate(self.lexer.errors, 1):
+                    self.logger.error(f"  Ошибка {i}: {error}")
+                
+                self._log("\nↈ Обнаружены лексические ошибки:", 'error')
                 for error in self.lexer.errors:
                     self._log(f"  • {error}", 'error')
                 return
             
+            self.logger.info("Лексический анализ завершен успешно")
             self._log(f"✔ Найдено {len(tokens)} токенов", 'success')
+            
+            # Заполнение таблицы токенов
+            self.logger.info("Заполнение таблицы токенов...")
             self._fill_tokens_table(tokens)
+            self.logger.info("Таблица токенов заполнена")
+            
+            self.logger.info("Заполнение таблицы идентификаторов...")
             self._fill_identifier_table()
+            self.logger.info("Таблица идентификаторов заполнена")
             
         except Exception as e:
             self.logger.exception(f"Ошибка при лексическом анализе: {str(e)}")
@@ -578,68 +600,78 @@ class TranslatorGUI:
         
         # 2. Синтаксический анализ
         self.logger.section("ЭТАП 2: СИНТАКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[2/6] Синтаксический анализ...")
+        self._log("\n[2/5] Синтаксический анализ...")
         
         try:
+            self.logger.info("Создание парсера...")
             self.parser = Parser(tokens)
+            self.logger.info("Парсер создан успешно")
+            
+            self.logger.info("Запуск парсинга...")
             self.ast = self.parser.parse()
+            self.logger.info(f"Парсинг завершен. Тип корневого узла: {type(self.ast).__name__}")
             
             if self.parser.errors:
-                self._log("\n✗ Обнаружены синтаксические ошибки:", 'error')
+                self.logger.error(f"Обнаружено синтаксических ошибок: {len(self.parser.errors)}")
+                for i, error in enumerate(self.parser.errors, 1):
+                    self.logger.error(f"  Ошибка {i}: {error}")
+                
+                self._log("\nↈ Обнаружены синтаксические ошибки:", 'error')
                 for error in self.parser.errors:
                     self._log(f"  • {error}", 'error')
                 return
             
+            self.logger.info("Синтаксический анализ завершен успешно")
             self._log("✔ Синтаксическое дерево построено", 'success')
             
+            # Преобразование AST в структурированное дерево
+            self.logger.info("Преобразование AST в структурированное дерево...")
+            tree_node = self.tree_visitor.visit(self.ast)
+            self.logger.info("Дерево преобразовано успешно")
+            
             # Отображение дерева
-            self._display_ast_text(self.ast)
-            self._display_ast_graph(self.ast)
+            self.logger.info("Отображение текстового дерева...")
+            self._display_tree_text(tree_node)
+            self.logger.info("Текстовое дерево отображено")
+            
+            self.logger.info("Отображение графического дерева...")
+            self._display_tree_graph(tree_node)
+            self.logger.info("Графическое дерево отображено")
             
         except Exception as e:
             self.logger.exception(f"Ошибка при синтаксическом анализе: {str(e)}")
             raise
         
-        # 3. Семантический анализ
-        self.logger.section("ЭТАП 3: СЕМАНТИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[3/6] Семантический анализ...")
+        # 3. Оптимизация
+        self.logger.section("ЭТАП 3: ОПТИМИЗАЦИЯ")
+        self._log("\n[3/5] Оптимизация...")
         
         try:
-            semantic_errors = self.semantic_analyzer.analyze(self.ast)
-            
-            if semantic_errors:
-                self._log(f"\n✗ Обнаружены семантические ошибки ({len(semantic_errors)}):", 'error')
-                for error in semantic_errors:
-                    self._log(f"  • {error}", 'error')
-                return
-            
-            self._log("✔ Семантический анализ пройден", 'success')
-            
-        except Exception as e:
-            self.logger.exception(f"Ошибка при семантическом анализе: {str(e)}")
-            raise
-        
-        # 4. Оптимизация
-        self.logger.section("ЭТАП 4: ОПТИМИЗАЦИЯ")
-        self._log("\n[4/6] Оптимизация...")
-        
-        try:
+            self.logger.info("Запуск оптимизатора...")
             optimized_ast = self.optimizer.optimize(self.ast)
+            self.logger.info(f"Оптимизация завершена. Применено оптимизаций: {self.optimizer.optimizations_applied}")
+            
             self._log(f"✔ Применено {self.optimizer.optimizations_applied} оптимизаций", 'success')
         except Exception as e:
             self.logger.exception(f"Ошибка при оптимизации: {str(e)}")
             raise
         
-        # 5. Генерация кода
-        self.logger.section("ЭТАП 5: ГЕНЕРАЦИЯ КОДА")
-        self._log("\n[5/6] Генерация Python 3 кода...")
+        # 4. Генерация кода
+        self.logger.section("ЭТАП 4: ГЕНЕРАЦИЯ КОДА")
+        self._log("\n[4/5] Генерация Python 3 кода...")
         
         try:
+            self.logger.info("Запуск генератора кода...")
             python3_code = self.generator.generate(optimized_ast)
+            self.logger.info(f"Генерация завершена. Длина кода: {len(python3_code)} символов")
+            self.logger.debug(f"Первые 100 символов: {python3_code[:100]}")
             
+            # Вывод результата
+            self.logger.info("Вывод результата в GUI...")
             self.output_text.configure(state=tk.NORMAL)
             self.output_text.insert('1.0', python3_code)
             self.output_text.configure(state=tk.DISABLED)
+            self.logger.info("Результат выведен")
             
             self._log("✔ Код успешно сгенерирован", 'success')
             
@@ -647,8 +679,9 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при генерации кода: {str(e)}")
             raise
         
-        # 6. Завершение
+        # 5. Завершение
         self.logger.section("ЗАВЕРШЕНИЕ")
+        self.logger.info("Все этапы завершены успешно")
         
         self._log("\n" + "=" * 60)
         self._log("АНАЛИЗ ЗАВЕРШЕН УСПЕШНО!", 'success')
@@ -683,6 +716,7 @@ class TranslatorGUI:
         if not self.id_table:
             return
         
+        # Настройка цветов для scope
         self._configure_scope_tags()
         
         for entry in self.id_table.get_all_entries():
@@ -712,19 +746,27 @@ class TranslatorGUI:
         hash_val = sum(ord(c) for c in scope)
         return self.scope_colors[hash_val % len(self.scope_colors)]
     
-    def _display_ast_text(self, node: ASTNode):
-        """Отобразить AST в текстовом виде"""
-        if hasattr(node, 'ast_to_string'):
-            tree_str = node.ast_to_string(0)
-        else:
-            tree_str = str(node)
+    def _display_tree_text(self, tree_node: TreeNode, level: int = 0):
+        """Отобразить дерево в текстовом виде (как в labSYN.py)"""
+        if not tree_node:
+            return
         
-        self.tree_text.insert(tk.END, tree_str)
+        indent = "  " * level
+        
+        # Выводим узел
+        if tree_node.value:
+            self.tree_text.insert(tk.END, f"{indent}{tree_node.name} '{tree_node.value}'\n")
+        else:
+            self.tree_text.insert(tk.END, f"{indent}{tree_node.name}\n")
+        
+        # Рекурсивно выводим детей
+        for child in tree_node.children:
+            self._display_tree_text(child, level + 1)
     
-    def _display_ast_graph(self, ast: ASTNode):
-        """Отобразить AST графически"""
-        if self.ast_visualizer and ast:
-            self.ast_visualizer.draw_tree(ast)
+    def _display_tree_graph(self, tree_node: TreeNode):
+        """Отобразить дерево графически"""
+        if self.ast_visualizer and tree_node:
+            self.ast_visualizer.draw_tree(tree_node)
 
 
 def main():
