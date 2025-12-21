@@ -15,6 +15,7 @@ from lexer import Lexer, Token, TokenType
 from parser import Parser
 from parser.ast_nodes import ASTNode, Program
 from identifier_table import IdentifierTable
+from semantic_analyzer import SemanticAnalyzer
 from optimizer import Optimizer
 from code_generator import CodeGenerator
 from examples.examples import EXAMPLES
@@ -249,6 +250,7 @@ class TranslatorGUI:
         self.lexer: Optional[Lexer] = None
         self.parser: Optional[Parser] = None
         self.id_table: Optional[IdentifierTable] = None
+        self.semantic_analyzer = SemanticAnalyzer()
         self.optimizer = Optimizer()
         self.generator = CodeGenerator()
         self.ast: Optional[ASTNode] = None
@@ -553,7 +555,7 @@ class TranslatorGUI:
         
         # 1. Лексический анализ
         self.logger.section("ЭТАП 1: ЛЕКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[1/5] Лексический анализ...")
+        self._log("\n[1/6] Лексический анализ...")
         
         try:
             self.lexer = Lexer(source)
@@ -576,7 +578,7 @@ class TranslatorGUI:
         
         # 2. Синтаксический анализ
         self.logger.section("ЭТАП 2: СИНТАКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[2/5] Синтаксический анализ...")
+        self._log("\n[2/6] Синтаксический анализ...")
         
         try:
             self.parser = Parser(tokens)
@@ -590,7 +592,7 @@ class TranslatorGUI:
             
             self._log("✔ Синтаксическое дерево построено", 'success')
             
-            # Отображение дерева используя новые методы AST
+            # Отображение дерева
             self._display_ast_text(self.ast)
             self._display_ast_graph(self.ast)
             
@@ -598,9 +600,28 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при синтаксическом анализе: {str(e)}")
             raise
         
-        # 3. Оптимизация
-        self.logger.section("ЭТАП 3: ОПТИМИЗАЦИЯ")
-        self._log("\n[3/5] Оптимизация...")
+        # 3. Семантический анализ
+        self.logger.section("ЭТАП 3: СЕМАНТИЧЕСКИЙ АНАЛИЗ")
+        self._log("\n[3/6] Семантический анализ...")
+        
+        try:
+            semantic_errors = self.semantic_analyzer.analyze(self.ast)
+            
+            if semantic_errors:
+                self._log(f"\n✗ Обнаружены семантические ошибки ({len(semantic_errors)}):", 'error')
+                for error in semantic_errors:
+                    self._log(f"  • {error}", 'error')
+                return
+            
+            self._log("✔ Семантический анализ пройден", 'success')
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при семантическом анализе: {str(e)}")
+            raise
+        
+        # 4. Оптимизация
+        self.logger.section("ЭТАП 4: ОПТИМИЗАЦИЯ")
+        self._log("\n[4/6] Оптимизация...")
         
         try:
             optimized_ast = self.optimizer.optimize(self.ast)
@@ -609,9 +630,9 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при оптимизации: {str(e)}")
             raise
         
-        # 4. Генерация кода
-        self.logger.section("ЭТАП 4: ГЕНЕРАЦИЯ КОДА")
-        self._log("\n[4/5] Генерация Python 3 кода...")
+        # 5. Генерация кода
+        self.logger.section("ЭТАП 5: ГЕНЕРАЦИЯ КОДА")
+        self._log("\n[5/6] Генерация Python 3 кода...")
         
         try:
             python3_code = self.generator.generate(optimized_ast)
@@ -626,7 +647,7 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при генерации кода: {str(e)}")
             raise
         
-        # 5. Завершение
+        # 6. Завершение
         self.logger.section("ЗАВЕРШЕНИЕ")
         
         self._log("\n" + "=" * 60)
@@ -692,12 +713,7 @@ class TranslatorGUI:
         return self.scope_colors[hash_val % len(self.scope_colors)]
     
     def _display_ast_text(self, node: ASTNode):
-        """Отобразить AST в текстовом виде
-        
-        Метод отключен от рекурсивного обхода
-        и теперь автоматически использует
-        метод аст_то_стринг
-        """
+        """Отобразить AST в текстовом виде"""
         if hasattr(node, 'ast_to_string'):
             tree_str = node.ast_to_string(0)
         else:
