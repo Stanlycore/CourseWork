@@ -15,6 +15,7 @@ from lexer import Lexer, Token, TokenType
 from parser import Parser, ASTToTreeVisitor, TreeNode
 from parser.ast_nodes import ASTNode, Program
 from identifier_table import IdentifierTable
+from semantic_analyzer import SemanticAnalyzer
 from optimizer import Optimizer
 from code_generator import CodeGenerator
 from examples.examples import EXAMPLES
@@ -182,6 +183,7 @@ class TranslatorGUI:
         self.lexer: Optional[Lexer] = None
         self.parser: Optional[Parser] = None
         self.id_table: Optional[IdentifierTable] = None
+        self.semantic_analyzer = SemanticAnalyzer()
         self.optimizer = Optimizer()
         self.generator = CodeGenerator()
         self.ast: Optional[ASTNode] = None
@@ -306,7 +308,7 @@ class TranslatorGUI:
         tree_graph_frame = ttk.Frame(analysis_notebook)
         analysis_notebook.add(tree_graph_frame, text="🌲 Дерево (графика)")
         
-        # Canvas с прокруткой
+        # Canvas с прокруткою
         canvas_frame = ttk.Frame(tree_graph_frame)
         canvas_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
@@ -558,7 +560,7 @@ class TranslatorGUI:
         
         # 1. Лексический анализ
         self.logger.section("ЭТАП 1: ЛЕКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[1/5] Лексический анализ...")
+        self._log("\n[1/6] Лексический анализ...")
         
         try:
             self.logger.info("Создание лексера...")
@@ -600,7 +602,7 @@ class TranslatorGUI:
         
         # 2. Синтаксический анализ
         self.logger.section("ЭТАП 2: СИНТАКСИЧЕСКИЙ АНАЛИЗ")
-        self._log("\n[2/5] Синтаксический анализ...")
+        self._log("\n[2/6] Синтаксический анализ...")
         
         try:
             self.logger.info("Создание парсера...")
@@ -642,9 +644,35 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при синтаксическом анализе: {str(e)}")
             raise
         
-        # 3. Оптимизация
-        self.logger.section("ЭТАП 3: ОПТИМИЗАЦИЯ")
-        self._log("\n[3/5] Оптимизация...")
+        # 3. Семантический анализ
+        self.logger.section("ЭТАП 3: СЕМАНТИЧЕСКИЙ АНАЛИЗ")
+        self._log("\n[3/6] Семантический анализ...")
+        
+        try:
+            self.logger.info("Запуск семантического анализатора...")
+            semantic_errors = self.semantic_analyzer.analyze(self.ast)
+            self.logger.info(f"Семантический анализ завершен. Обнаружено ошибок: {len(semantic_errors)}")
+            
+            if semantic_errors:
+                self.logger.error(f"Обнаружено семантических ошибок: {len(semantic_errors)}")
+                for i, error in enumerate(semantic_errors, 1):
+                    self.logger.error(f"  Ошибка {i}: {error}")
+                
+                self._log(f"\nↈ Обнаружены семантические ошибки ({len(semantic_errors)}):", 'error')
+                for error in semantic_errors:
+                    self._log(f"  • {error}", 'error')
+                return
+            
+            self.logger.info("Семантический анализ пройден успешно")
+            self._log("✔ Семантический анализ пройден успешно", 'success')
+            
+        except Exception as e:
+            self.logger.exception(f"Ошибка при семантическом анализе: {str(e)}")
+            raise
+        
+        # 4. Оптимизация
+        self.logger.section("ЭТАП 4: ОПТИМИЗАЦИЯ")
+        self._log("\n[4/6] Оптимизация...")
         
         try:
             self.logger.info("Запуск оптимизатора...")
@@ -656,9 +684,9 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при оптимизации: {str(e)}")
             raise
         
-        # 4. Генерация кода
-        self.logger.section("ЭТАП 4: ГЕНЕРАЦИЯ КОДА")
-        self._log("\n[4/5] Генерация Python 3 кода...")
+        # 5. Генерация кода
+        self.logger.section("ЭТАП 5: ГЕНЕРАЦИЯ КОДА")
+        self._log("\n[5/6] Генерация Python 3 кода...")
         
         try:
             self.logger.info("Запуск генератора кода...")
@@ -679,7 +707,7 @@ class TranslatorGUI:
             self.logger.exception(f"Ошибка при генерации кода: {str(e)}")
             raise
         
-        # 5. Завершение
+        # 6. Завершение
         self.logger.section("ЗАВЕРШЕНИЕ")
         self.logger.info("Все этапы завершены успешно")
         
