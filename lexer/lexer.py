@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Лексический анализатор для Python 2/3
-ФАЗА 1 ИСПРАВЛЕНИЯ: корректная обработка INDENT/DEDENT
+ИСПРАВЛЕННА ВЕРСИЯ: корректная обработка таблицы идентификаторов
 """
 
 from typing import List, Optional
@@ -21,13 +21,12 @@ class Lexer:
         self.tokens: List[Token] = []
         self.errors: List[str] = []
         
-        # Таблица идентификаторов
+        # Таблица идентификаторов (ИСПРАВЛЕНО)
         self.identifier_table = IdentifierTable()
         
         # Стек отступов для INDENT/DEDENT
         self.indent_stack = [0]
         self.at_line_start = True
-        self.pending_dedents = 0  # Отложенные DEDENT токены
         
     def current_char(self) -> Optional[str]:
         """Текущий символ"""
@@ -67,7 +66,7 @@ class Lexer:
                 break
     
     def handle_indentation(self):
-        """Обработка отступов в начале строки - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        """Обработка отступов в начале строки (ИСПРАВЛЕННАЯ)"""
         if not self.at_line_start:
             return
         
@@ -83,7 +82,7 @@ class Lexer:
                 indent_level += 4
             self.advance()
         
-        # Пропустить пустые строки и комментарии (они не влияют на отступ)
+        # Пропустим пустые строки и комментарии (они не влияют на отступ)
         if self.current_char() in ('\n', '#', None):
             return
         
@@ -94,22 +93,19 @@ class Lexer:
         current_indent = self.indent_stack[-1]
         
         if indent_level > current_indent:
-            # Вход в новый блок - может быть только на 1 уровень глубже
-            if indent_level != current_indent + 4 and indent_level != current_indent + 1:
-                # Допускаем произвольное увеличение (не очень строго, как в реальном Python)
-                pass
+            # Вход в новый блок
             self.indent_stack.append(indent_level)
             self.tokens.append(Token(TokenType.INDENT, indent_level, start_line, start_col))
             # Входим в новую область видимости
-            self.identifier_table.enter_scope()
+            new_scope = self.identifier_table.enter_scope()
             
         elif indent_level < current_indent:
-            # Выход из блока(ов)
+            # Выход из блока
             while len(self.indent_stack) > 1 and self.indent_stack[-1] > indent_level:
                 self.indent_stack.pop()
                 self.tokens.append(Token(TokenType.DEDENT, 0, start_line, start_col))
                 # Выходим из области видимости
-                self.identifier_table.exit_scope()
+                old_scope = self.identifier_table.exit_scope()
             
             # Проверка корректности отступа
             if self.indent_stack[-1] != indent_level:
@@ -135,8 +131,14 @@ class Lexer:
         if value in KEYWORD_MAP:
             return Token(KEYWORD_MAP[value], value, start_line, start_column)
         
-        # Добавляем идентификатор в таблицу
-        success, error = self.identifier_table.insert(value, kind="var", type_="auto")
+        # Добавляем идентификатор в таблицу (ИСПРАВЛЕНО)
+        success, error = self.identifier_table.insert(
+            value, 
+            kind="var", 
+            type_="auto",
+            line=start_line,
+            column=start_column
+        )
         if not success:
             self.errors.append(f"Строка {start_line}:{start_column}: {error}")
         
@@ -172,7 +174,7 @@ class Lexer:
                 self.errors.append(f"Строка {start_line}:{start_column}: Некорректное binary число '{value}'")
                 return Token(TokenType.UNKNOWN, value, start_line, start_column)
         
-        # Octal: 0o... (Python3) или 0... (Python2)
+        # Octal: 0o... (Python3) or 0... (Python2)
         if self.current_char() == '0' and self.peek_char() in ('o', 'O'):
             value += self.advance()  # 0
             value += self.advance()  # o
@@ -205,7 +207,7 @@ class Lexer:
             while self.current_char() and self.current_char().isdigit():
                 value += self.advance()
         
-        # Python 2: long suffix L или l
+        # Python 2: long suffix L or l
         has_long_suffix = False
         if self.current_char() in ('L', 'l'):
             has_long_suffix = True
@@ -268,7 +270,7 @@ class Lexer:
         return Token(TokenType.STRING, value, start_line, start_column)
     
     def scan(self) -> List[Token]:
-        """Главный цикл сканирования - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        """Главный цикл сканирования (исправленная)"""
         while self.pos < len(self.source):
             # Обработка отступов в начале строки
             if self.at_line_start:
